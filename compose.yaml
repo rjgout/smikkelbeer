@@ -1,0 +1,34 @@
+services:
+  smikkelbeer:
+    image: ghcr.io/rjgout/smikkelbeer:preview
+    restart: unless-stopped
+    init: true
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - '127.0.0.1:3080:3000'
+    volumes:
+      - smikkelbeer-data:/data
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      HOST: 0.0.0.0
+      PORT: '3000'
+      BODY_SIZE_LIMIT: '65536'
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+    stop_grace_period: 60s
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '3'
+volumes:
+  smikkelbeer-data:

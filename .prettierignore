@@ -1,0 +1,10 @@
+node_modules
+.svelte-kit
+build
+data
+.e2e-data
+artifacts
+playwright-report
+test-results
+package-lock.json
+docs/MASTERPROMPT.md

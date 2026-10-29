@@ -1,0 +1,13 @@
+.git
+node_modules
+.svelte-kit
+build
+data
+.env*
+backups
+test-results
+playwright-report
+coverage
+
+.e2e-data
+artifacts

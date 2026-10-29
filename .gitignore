@@ -1,0 +1,17 @@
+node_modules/
+.svelte-kit/
+build/
+data/
+.env*
+!.env.example
+*.db*
+*.sqlite*
+*.key
+*.pem
+test-results/
+playwright-report/
+coverage/
+backups/
+.e2e-data/
+
+artifacts/

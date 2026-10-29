@@ -1,0 +1,52 @@
+{
+  "name": "smikkelbeer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "dev": "vite dev --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "start": "node build",
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "backup": "node scripts/backup.mjs"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-node": "^6.0.0",
+    "@sveltejs/kit": "^3.1.0",
+    "cheerio": "^1.1.2",
+    "imapflow": "^1.0.0",
+    "luxon": "^3.7.0",
+    "mailparser": "^3.7.0",
+    "nodemailer": "^10.3.1",
+    "otpauth": "^9.4.0",
+    "svelte": "^5.57.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/luxon": "^3.7.0",
+    "@types/mailparser": "^3.4.0",
+    "@types/node": "^24.0.0",
+    "@types/nodemailer": "^7.0.0",
+    "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte-check": "^4.3.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "imports": {
+    "#lib/*": "./src/lib/*.ts"
+  }
+}
