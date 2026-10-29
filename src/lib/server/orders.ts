@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { all, one, run, transaction, audit } from './db';
 import { settings } from './config';
 import { latestMenu, syncMenu, priceLines, type Product } from './menu';
+import { MenuSyncError } from './menu-jobs';
 import { enqueue, escape, renderOrder, type FrozenOrder } from './mail';
 export const roundInput = z.object({
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -34,7 +35,8 @@ export function roundTimes(input: z.infer<typeof roundInput>) {
 export function validateNewRound(input: unknown) {
   const v = roundInput.parse(input),
     times = roundTimes(v);
-  if (times.closes <= Date.now()) throw new Error('Sluiting ligt in het verleden');
+  if (times.closes <= Date.now())
+    throw new MenuSyncError('ROUND_PAST', 'Sluiting ligt in het verleden.', 400);
   if (
     one(
       "SELECT id FROM rounds WHERE opens<? AND closes>? AND status NOT IN ('cancelled','completed')",
@@ -42,8 +44,19 @@ export function validateNewRound(input: unknown) {
       times.opens,
     )
   )
-    throw new Error('Bestelvensters mogen niet overlappen');
+    throw new MenuSyncError(
+      'ROUND_OVERLAP',
+      'Bestelvensters mogen niet overlappen. Controleer het ronde-overzicht.',
+    );
   return { v, times };
+}
+export function requireMenuApproval() {
+  if (!settings().scrapingApproved)
+    throw new MenuSyncError(
+      'SCRAPING_DISABLED',
+      'Beoordeel de bronvoorwaarden en activeer synchronisatie in Instellingen.',
+      400,
+    );
 }
 export async function createRound(
   input: unknown,
@@ -52,7 +65,16 @@ export async function createRound(
   automatic = false,
 ) {
   const { v } = validateNewRound(input);
-  const menu = synchronize ? await syncMenu(actor) : latestMenu();
+  let menu;
+  if (!synchronize) menu = latestMenu();
+  else {
+    requireMenuApproval();
+    try {
+      menu = latestMenu();
+    } catch {
+      menu = await syncMenu(actor);
+    }
+  }
   return createRoundFromMenu(v, actor, menu, automatic);
 }
 export function createRoundFromMenu(
@@ -73,7 +95,10 @@ export function createRoundFromMenu(
         times.opens,
       )
     )
-      throw new Error('Bestelvensters mogen niet overlappen');
+      throw new MenuSyncError(
+        'ROUND_OVERLAP',
+        'Bestelvensters mogen niet overlappen. Controleer het ronde-overzicht.',
+      );
     run(
       'INSERT INTO rounds(id,number,day,opens,closes,sends,arrives,snapshot,digest,payment_mode,payment_link,test,automatic) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       id,
@@ -277,7 +302,10 @@ export function updateTimes(id: string, input: unknown, actor: string) {
         r.opens,
       )
     )
-      throw new Error('Bestelvensters mogen niet overlappen');
+      throw new MenuSyncError(
+        'ROUND_OVERLAP',
+        'Bestelvensters mogen niet overlappen. Controleer het ronde-overzicht.',
+      );
     run(
       'UPDATE rounds SET closes=?,sends=?,arrives=?,revision=revision+1 WHERE id=?',
       times.closes,

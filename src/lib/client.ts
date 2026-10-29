@@ -87,3 +87,17 @@ export const statusLabel: Record<string, string> = {
   cancelled: 'Geannuleerd',
   pending: 'In wachtrij',
 };
+
+// Assemble ISO calendar fields explicitly; locale display order is not an HTML contract.
+export function calendarDate(value = new Date(), timeZone = 'Europe/Amsterdam') {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    calendar: 'gregory',
+    numberingSystem: 'latn',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const field = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)!.value;
+  return `${field('year')}-${field('month')}-${field('day')}`;
+}

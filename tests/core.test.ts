@@ -94,6 +94,7 @@ beforeEach(() => {
   vi.useRealTimers();
   db.exec('PRAGMA foreign_keys=OFF; DROP TRIGGER IF EXISTS protect_last_admin_delete;');
   for (const table of [
+    'round_creation_requests',
     'menu_sync_jobs',
     'jobs',
     'outbox',
@@ -123,7 +124,7 @@ afterAll(() => {
 });
 describe('migrations, encryption and configuration', () => {
   it('applies migrations and enforces foreign keys', () => {
-    expect(one('SELECT count(*) n FROM migrations').n).toBe(4);
+    expect(one('SELECT count(*) n FROM migrations').n).toBe(5);
     expect(() => run('INSERT INTO favorites VALUES (?,?)', 'missing', '85')).toThrow();
   });
   it('authenticated encryption rejects tampering and stores no plaintext config', () => {
@@ -726,7 +727,15 @@ it('prepares an automatic snapshot before the configured invitation time', async
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-30T10:20:00Z'));
   const s = settings();
-  saveSettings({ ...s, weekdays: [1, 2, 3, 4, 5, 6, 7], smtp: { ...s.smtp, host: '' } }, 'test');
+  saveSettings(
+    {
+      ...s,
+      scrapingApproved: true,
+      weekdays: [1, 2, 3, 4, 5, 6, 7],
+      smtp: { ...s.smtp, host: '' },
+    },
+    'test',
+  );
   const sync = vi.spyOn(menu, 'syncMenu').mockResolvedValue({ products, digest: digest(products) });
   try {
     await tick();

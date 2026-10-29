@@ -57,4 +57,4 @@ Bezoek daarna `/setup` via HTTPS. Een nieuw datavolume genereert automatisch een
 - [Back-up en herstel](docs/BACKUP_RESTORE.md)
 - [Oorspronkelijke opdracht](docs/MASTERPROMPT.md)
 
-Menukaartsynchronisatie loopt als persistente achtergrondtaak: de start-API antwoordt direct 202 en de beheerpagina toont voortgang via korte statusrequests. Dit voorkomt dat honderden optievensters binnen één Cloudflare-request moeten passen. Ook rondevoorbereiding gebruikt deze taak. Zie [Cloudflare-diagnose en synchronisatiebeheer](docs/MENU_SYNC.md).
+Menukaartsynchronisatie loopt als persistente achtergrondtaak: de start-API antwoordt direct 202 en de beheerpagina toont voortgang via korte statusrequests. Dit voorkomt dat honderden optievensters binnen één Cloudflare-request moeten passen. Rondevoorbereiding gebruikt direct een volledig gecontroleerde momentopname van maximaal 30 minuten oud; zo nodig volgt een aparte achtergrondtaak. Vóór verzending volgt altijd een nieuwe volledige broncontrole. Aanvraag-IDs voorkomen dubbele ronde-aanmaak na verloren antwoorden. Zie [Cloudflare-diagnose en synchronisatiebeheer](docs/MENU_SYNC.md).

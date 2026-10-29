@@ -159,6 +159,10 @@ export function retain(days: number) {
     );
     run('DELETE FROM audit WHERE at<?', cutoff);
     run(
+      "DELETE FROM round_creation_requests WHERE created<? AND (job_id IS NULL OR job_id IN (SELECT id FROM menu_sync_jobs WHERE status NOT IN ('queued','running')))",
+      cutoff,
+    );
+    run(
       "DELETE FROM menu_sync_jobs WHERE finished<? AND status NOT IN ('queued','running')",
       cutoff,
     );

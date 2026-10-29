@@ -18,16 +18,11 @@ import {
   permissions,
 } from '#lib/server/auth';
 import { settings, publicSettings, saveSettings } from '#lib/server/config';
+import { requestRoundCreation, roundCreationStatus } from '#lib/server/round-creation';
 import { syncHistory } from '#lib/server/menu';
 import { MenuSyncError, enqueueMenuSync, menuSyncStatus } from '#lib/server/menu-jobs';
 import { invite, enqueue, escape, renderOrder, pollInbox } from '#lib/server/mail';
-import {
-  validateNewRound,
-  saveOrder,
-  updateTimes,
-  queueValidatedRound,
-  frozenOrders,
-} from '#lib/server/orders';
+import { saveOrder, updateTimes, queueValidatedRound, frozenOrders } from '#lib/server/orders';
 import { passwordHash, encrypt } from '#lib/server/crypto';
 import { Secret } from 'otpauth';
 const preferenceSchema = z
@@ -152,6 +147,22 @@ export async function GET(event: RequestEvent) {
     });
   }
   if (path === 'admin') return json(dashboard(event));
+  if (path === 'rounds/create/status') {
+    const a = requireAdmin(event, 'rounds');
+    const id = event.url.searchParams.get('id');
+    if (!z.uuid().safeParse(id).success)
+      return json({ message: 'Ongeldige rondeaanvraag-ID.' }, { status: 400 });
+    const state = roundCreationStatus(a.id, id!);
+    if (!state)
+      return json(
+        {
+          message:
+            'Deze rondeaanvraag is nog niet geregistreerd. Probeer opnieuw met hetzelfde aanvraag-ID.',
+        },
+        { status: 404 },
+      );
+    return json(state);
+  }
   if (path === 'menu/sync/status') {
     const admin = requireAdmin(event);
     if (!admin.permissions.some((p) => ['*', 'menu', 'rounds'].includes(p)))
@@ -340,11 +351,13 @@ async function post(event: RequestEvent) {
   }
   if (p === 'rounds/create') {
     const a = requireAdmin(event, 'rounds');
-    const { v: input } = validateNewRound(v);
-    const result = enqueueMenuSync(a.id, 'round.create', input, false);
+    const result = requestRoundCreation(v, a.id);
     return json(result, {
-      status: 202,
-      headers: { Location: '/api/menu/sync/status?id=' + result.job.id, 'Retry-After': '2' },
+      status: result.job ? 202 : result.reused ? 200 : 201,
+      headers: {
+        Location: '/api/rounds/create/status?id=' + result.requestId,
+        ...(result.job ? { 'Retry-After': '2' } : {}),
+      },
     });
   }
   if (p === 'rounds/times') {

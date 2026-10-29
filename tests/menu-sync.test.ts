@@ -82,6 +82,7 @@ beforeEach(() => {
   );
   db.exec('PRAGMA foreign_keys=OFF; DROP TRIGGER protect_last_admin_delete;');
   for (const table of [
+    'round_creation_requests',
     'menu_sync_jobs',
     'outbox',
     'orders',
@@ -309,7 +310,9 @@ it('creates and rechecks rounds through queued HTTP actions without holding thei
       arrival: '12:30',
       paymentMode: 'individual',
     };
-  const accepted = await POST(event('rounds/create', a.token, input));
+  const accepted = await POST(
+    event('rounds/create', a.token, { ...input, requestId: randomUUID() }),
+  );
   expect(accepted.status).toBe(202);
   expect(all('SELECT * FROM rounds')).toHaveLength(0);
   await processMenuSyncJobs(source());
@@ -317,14 +320,15 @@ it('creates and rechecks rounds through queued HTTP actions without holding thei
   expect(job.status).toBe('succeeded');
   expect(job.resultRoundId).toBeTruthy();
   expect(all('SELECT * FROM rounds')).toHaveLength(1);
-  const again = await POST(event('rounds/create', a.token, input));
-  expect(again.status).toBe(400);
+  const again = await POST(event('rounds/create', a.token, { ...input, requestId: randomUUID() }));
+  expect(again.status).toBe(409);
   expect(all('SELECT * FROM menu_sync_jobs')).toHaveLength(1);
 });
 it('checks dependent round permissions again after the source is complete', async () => {
   const a = admin('coordinator');
   await POST(
     event('rounds/create', a.token, {
+      requestId: randomUUID(),
       day: '2099-10-29',
       invite: '11:45',
       close: '12:00',
@@ -435,15 +439,201 @@ it('retains a completed catalog when a dependent round expires during source val
   vi.useFakeTimers();
   vi.setSystemTime(closes - 60000);
   const a = admin();
-  await POST(event('rounds/create', a.token, input));
+  await POST(event('rounds/create', a.token, { ...input, requestId: randomUUID() }));
   const adapter = source();
   adapter.delay = vi.fn(async () => {
     vi.setSystemTime(closes + 1000);
   }) as any;
   await processMenuSyncJobs(adapter);
-  expect(menuSyncStatus().job?.error?.code).toBe('ROUND_ACTION_FAILED');
+  expect(menuSyncStatus().job?.error?.code).toBe('ROUND_PAST');
   expect(all('SELECT * FROM rounds')).toHaveLength(0);
   expect(latestMenu().products).toHaveLength(products.length);
+});
+const roundForm = {
+  day: '2099-10-29',
+  invite: '11:45',
+  close: '12:00',
+  send: '12:05',
+  arrival: '12:30',
+  paymentMode: 'individual',
+};
+it('creates immediately from the latest fresh complete snapshot, preserves options and never calls the source', async () => {
+  const { parseOptions } = await import('../src/lib/server/menu');
+  const full = structuredClone(products);
+  full.find((p) => p.id === '85')!.options = parseOptions(
+    readFileSync('tests/fixtures/options-85.html', 'utf8'),
+    '85',
+  );
+  full[1].available = false;
+  run(
+    'INSERT INTO syncs VALUES (?,?,1,?,?,NULL)',
+    randomUUID(),
+    Date.now(),
+    digest(full),
+    JSON.stringify(full),
+  );
+  const a = admin(),
+    requestId = randomUUID();
+  const responses = await Promise.all(
+    Array.from({ length: 5 }, () =>
+      POST(event('rounds/create', a.token, { ...roundForm, requestId })),
+    ),
+  );
+  expect(responses.map((r) => r.status)).toEqual([201, 200, 200, 200, 200]);
+  const results = await Promise.all(responses.map((r) => r.json()));
+  expect(new Set(results.map((r) => r.roundId)).size).toBe(1);
+  expect(results.every((r) => r.job === null)).toBe(true);
+  expect(JSON.parse(one('SELECT snapshot FROM rounds').snapshot)).toEqual(full);
+  expect(one('SELECT digest FROM rounds').digest).toBe(digest(full));
+  expect(all('SELECT * FROM menu_sync_jobs')).toHaveLength(0);
+  expect(fetch).not.toHaveBeenCalled();
+  const recovered = await (
+    await GET(event('rounds/create/status?id=' + requestId, a.token))
+  ).json();
+  expect(recovered.roundId).toBe(results[0].roundId);
+  const other = admin();
+  expect((await GET(event('rounds/create/status?id=' + requestId, other.token))).status).toBe(404);
+  const conflict = await POST(
+    event('rounds/create', a.token, { ...roundForm, requestId, close: '12:01' }),
+  );
+  expect(conflict.status).toBe(409);
+  expect((await conflict.json()).code).toBe('REQUEST_CONFLICT');
+});
+it.each(['missing', 'stale', 'failed', 'corrupt', 'future'])(
+  'requires a separate full background check when the snapshot is %s',
+  async (reason) => {
+    if (reason !== 'missing') {
+      oldSuccess();
+      if (reason === 'stale') run('UPDATE syncs SET at=?', Date.now() - 30 * 60000 - 1);
+      if (reason === 'failed')
+        run(
+          'INSERT INTO syncs VALUES (?,?,0,NULL,NULL,?)',
+          randomUUID(),
+          Date.now() - 60001,
+          'Veilige bronfout',
+        );
+      if (reason === 'corrupt') run("UPDATE syncs SET digest='incorrect'");
+      if (reason === 'future') run('UPDATE syncs SET at=?', Date.now() + 60000);
+    }
+    const a = admin();
+    const response = await POST(
+      event('rounds/create', a.token, { ...roundForm, requestId: randomUUID() }),
+    );
+    // Future-dated records also conservatively enforce the existing cooldown.
+    expect(response.status).toBe(reason === 'future' ? 429 : 202);
+    expect(all('SELECT * FROM rounds')).toHaveLength(0);
+    expect(fetch).not.toHaveBeenCalled();
+    if (response.status === 202) {
+      await processMenuSyncJobs(source());
+      expect(all('SELECT * FROM rounds')).toHaveLength(1);
+    }
+  },
+);
+it('accepts the exact freshness boundary and rejects a corrupt snapshot without silently falling back', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-29T11:00:00Z'));
+  oldSuccess();
+  run('UPDATE syncs SET at=?', Date.now() - 30 * 60000);
+  const { createRound } = await import('../src/lib/server/orders');
+  await createRound(roundForm, 'test');
+  expect(all('SELECT * FROM rounds')).toHaveLength(1);
+  expect(fetch).not.toHaveBeenCalled();
+  run("UPDATE syncs SET digest='wrong'");
+  expect(() => latestMenu()).toThrow('integriteit');
+});
+it('retains approval, permissions, valid dates and time-order checks even on the immediate path', async () => {
+  oldSuccess();
+  const a = admin();
+  const pay = admin('payments');
+  await expect(
+    POST(event('rounds/create', pay.token, { ...roundForm, requestId: randomUUID() })),
+  ).rejects.toBeDefined();
+  saveSettings({ ...settings(), scrapingApproved: false }, 'test');
+  expect(
+    (await POST(event('rounds/create', a.token, { ...roundForm, requestId: randomUUID() }))).status,
+  ).toBe(400);
+  approved();
+  for (const changes of [
+    { day: '10/29/2099' },
+    { day: '2099-02-30' },
+    { send: '12:29' },
+    { day: '2099-10-25', invite: '02:15', close: '02:30' },
+  ]) {
+    const response = await POST(
+      event('rounds/create', a.token, { ...roundForm, ...changes, requestId: randomUUID() }),
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).message).toMatch(/datum|tijd|voorbereiding/);
+  }
+  expect(all('SELECT * FROM rounds')).toHaveLength(0);
+});
+it('deduplicates a slow creation across lost responses, durable status reads and completion', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-29T11:00:00Z'));
+  const a = admin(),
+    requestId = randomUUID(),
+    input = { ...roundForm, requestId };
+  const largeMenu = Array.from(
+    { length: 213 },
+    (_, i) =>
+      `<div class="dish" id="product${1000 + i}" data-productid="${1000 + i}" data-productnaam="Testproduct" data-productcategorie="Patat" data-prijs="2.90"><button>Toevoegen</button></div>`,
+  ).join('');
+  const accepted = await POST(event('rounds/create', a.token, input));
+  expect(accepted.status).toBe(202);
+  const adapter = source(largeMenu);
+  adapter.delay = vi.fn(
+    (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+  ) as any;
+  const work = processMenuSyncJobs(adapter);
+  await advance();
+  await vi.advanceTimersByTimeAsync(130000);
+  const again = await (await POST(event('rounds/create', a.token, input))).json();
+  expect(again.reused).toBe(true);
+  expect(again.job.processed).toBe(130);
+  expect(all('SELECT * FROM menu_sync_jobs')).toHaveLength(1);
+  expect(all('SELECT * FROM rounds')).toHaveLength(0);
+  const status = await GET(event('rounds/create/status?id=' + requestId, a.token));
+  expect((await status.json()).job.id).toBe(again.job.id);
+  await vi.advanceTimersByTimeAsync(83000);
+  await work;
+  const complete = await (await POST(event('rounds/create', a.token, input))).json();
+  expect(complete.roundId).toBeTruthy();
+  expect(complete.job.status).toBe('succeeded');
+  expect(all('SELECT * FROM rounds')).toHaveLength(1);
+  expect(adapter.read).toHaveBeenCalledTimes(214);
+});
+it('performs a new full source check before final dispatch even when a fresh snapshot exists', async () => {
+  oldSuccess();
+  const a = admin();
+  const created = await (
+    await POST(event('rounds/create', a.token, { ...roundForm, requestId: randomUUID() }))
+  ).json();
+  const id = randomUUID();
+  run(
+    'INSERT INTO employees(id,name,name_key,email,created) VALUES (?,?,?,?,?)',
+    id,
+    'Beer',
+    'beer',
+    'beer@example.invalid',
+    Date.now(),
+  );
+  run(
+    "INSERT INTO orders(id,round_id,employee_id,name,lines,total,revision,updated) VALUES (?,?,?,'Beer',?,290,1,?)",
+    randomUUID(),
+    created.roundId,
+    id,
+    JSON.stringify([{ name: 'Patat', quantity: 1, total: 290, unit: 290, options: [], note: '' }]),
+    Date.now(),
+  );
+  run("UPDATE rounds SET status='closed',closes=0,sends=0 WHERE id=?", created.roundId);
+  const response = await POST(event('rounds/recheck', a.token, { id: created.roundId }));
+  expect(response.status).toBe(202);
+  expect(all("SELECT * FROM outbox WHERE kind='order'")).toHaveLength(0);
+  const adapter = source(fixture.replace('data-prijs="2.90"', 'data-prijs="3.90"'));
+  await processMenuSyncJobs(adapter);
+  expect(adapter.read).toHaveBeenCalledTimes(products.filter((p) => p.available).length + 1);
+  expect(one('SELECT status FROM rounds WHERE id=?', created.roundId).status).toBe('blocked');
+  expect(all("SELECT * FROM outbox WHERE kind='order'")).toHaveLength(0);
 });
 it('interrupts safely when a heartbeat cannot renew the database lease', async () => {
   const jobs = await import('../src/lib/server/menu-jobs');

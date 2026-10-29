@@ -15,7 +15,7 @@ Twee afzonderlijke sessiecookies en identiteitstypen. Geen enkele beheerdersrol 
 ## Bron → ronde → bestelling → outbox
 
 1. De vaste officiële HTTPS-bron wordt gesynchroniseerd; ieder beschikbaar product krijgt ook een gecontroleerd optiescherm. Vreemde/ontbrekende structuren, redirects, grote antwoorden of niet-ondersteunde varianten blokkeren synchronisatie.
-2. Een ronde bewaart een via een database-trigger onveranderlijke product- en prijsmomentopname plus SHA-256-digest.
+2. Ronde-aanmaak hergebruikt de laatste integere succesvolle broncontrole zolang deze maximaal 30 minuten oud is; anders volgt een aparte achtergrondcontrole. Een persistent aanvraag-ID dedupliceert directe en asynchrone creatie, ook na herstart. Een ronde bewaart een via een database-trigger onveranderlijke product- en prijsmomentopname plus SHA-256-digest.
 3. Het bestellen herberekent bedragen vanuit deze momentopname. Optimistische revisies voorkomen verloren updates. Deadlines gelden server-side.
 4. De scheduler sluit de ronde en voert vóór verzending een nieuwe bronsynchronisatie uit. Iedere wijziging blokkeert verzending. Een lege ronde wordt zonder mail afgehandeld.
 5. Eén gevalideerde orderverzameling genereert keuken- en individuele overzichten. Outboxregels hebben unieke deduplicatiesleutels en Message-ID's.

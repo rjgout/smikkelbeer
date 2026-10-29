@@ -447,11 +447,23 @@ export async function syncMenu(actor = 'system') {
     await sleep(250);
   }
 }
+export const MENU_MAX_AGE_MS = 30 * 60000;
 export function latestMenu() {
-  const row = one('SELECT * FROM syncs ORDER BY at DESC LIMIT 1');
-  if (!row || !row.success || Date.now() - row.at > 30 * 60000)
+  const row = one('SELECT * FROM syncs ORDER BY at DESC,rowid DESC LIMIT 1');
+  if (!row || !row.success || row.at > Date.now() || Date.now() - row.at > MENU_MAX_AGE_MS)
     throw new Error('Menukaart ontbreekt, is verouderd of synchronisatie mislukt');
-  return { products: JSON.parse(row.products) as Product[], digest: row.digest, at: row.at };
+  let products: Product[];
+  try {
+    products = JSON.parse(row.products);
+    if (!Array.isArray(products) || !products.length || digest(products) !== row.digest)
+      throw new Error('Invalid snapshot');
+  } catch {
+    throw new MenuSyncError(
+      'SNAPSHOT_INTEGRITY',
+      'De integriteit van de opgeslagen menukaart kon niet worden bevestigd. Voer een volledige broncontrole uit.',
+    );
+  }
+  return { products, digest: row.digest, at: row.at };
 }
 export const lineInput = z.object({
   productId: z.string().regex(/^\d+$/),

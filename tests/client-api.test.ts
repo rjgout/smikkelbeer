@@ -1,5 +1,5 @@
 import { it, expect, vi, afterEach } from 'vitest';
-import { api, ApiError } from '../src/lib/client';
+import { api, ApiError, calendarDate } from '../src/lib/client';
 afterEach(() => vi.unstubAllGlobals());
 it.each([502, 504, 524])(
   'preserves HTTP %i when a proxy returns HTML and never exposes its contents',
@@ -63,4 +63,26 @@ it('requests JSON explicitly and keeps structured Dutch API errors', async () =>
   expect(fetch.mock.calls[0][1]).toMatchObject({
     headers: { Accept: 'application/json', 'content-type': 'application/json' },
   });
+});
+
+it.each([
+  ['2026-10-29T23:30:00Z', '2026-10-30'],
+  ['2026-03-28T23:30:00Z', '2026-03-29'],
+  ['2026-07-01T22:30:00Z', '2026-07-02'],
+])('builds an HTML calendar date in Amsterdam at %s', (instant, expected) => {
+  expect(calendarDate(new Date(instant))).toBe(expected);
+});
+it('assembles date parts independently of locale display order', () => {
+  const format = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockReturnValue([
+    { type: 'month', value: '10' },
+    { type: 'literal', value: '/' },
+    { type: 'day', value: '29' },
+    { type: 'literal', value: '/' },
+    { type: 'year', value: '2026' },
+  ]);
+  try {
+    expect(calendarDate(new Date())).toBe('2026-10-29');
+  } finally {
+    format.mockRestore();
+  }
 });

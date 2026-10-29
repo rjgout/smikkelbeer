@@ -128,6 +128,37 @@ try {
     docker('exec', name, '/nodejs/bin/node', '-e', 'console.log(process.getuid())').trim(),
     '1000',
   );
+  // A quick round creation must remain idempotent even after an actual process restart.
+  const snapshot = JSON.stringify([
+    { id: '85', name: 'Patat', category: 'Patat', cents: 290, available: true, options: [] },
+  ]);
+  docker(
+    'exec',
+    name,
+    '/nodejs/bin/node',
+    '-e',
+    "const{DatabaseSync}=require('node:sqlite');const{createHash}=require('node:crypto');const db=new DatabaseSync('/data/smikkelbeer.sqlite');db.prepare('INSERT INTO syncs VALUES (?,?,1,?,?,NULL)').run(process.argv[1],Date.now(),createHash('sha256').update(process.argv[2]).digest('hex'),process.argv[2]);db.close();",
+    randomUUID(),
+    snapshot,
+  );
+  const config = (await (await req('admin', undefined, cookie)).json()).settings;
+  assert.equal(
+    (await req('settings', { ...config, scrapingApproved: true, weekdays: [] }, cookie)).status,
+    200,
+  );
+  const roundRequest = {
+    requestId: randomUUID(),
+    day: '2099-10-29',
+    invite: '11:45',
+    close: '12:00',
+    send: '12:05',
+    arrival: '12:30',
+    paymentMode: 'individual',
+  };
+  const created = await req('rounds/create', roundRequest, cookie);
+  assert.equal(created.status, 201);
+  const createdRound = await created.json();
+  assert(createdRound.roundId);
   // A real container restart must preserve and interrupt an expired worker lease.
   // The job is already 'running'; it is never eligible for a new source request.
   const interruptedId = randomUUID();
@@ -201,8 +232,19 @@ try {
       lastState?.status +
       ')',
   );
+  const repeated = await req('rounds/create', roundRequest, cookie);
+  assert.equal(repeated.status, 200);
+  assert.equal((await repeated.json()).roundId, createdRound.roundId);
+  assert.equal(
+    (
+      await (
+        await req('rounds/create/status?id=' + roundRequest.requestId, undefined, cookie)
+      ).json()
+    ).roundId,
+    createdRound.roundId,
+  );
   console.log(
-    'Container smoke passed: read-only/non-root startup, migrations, health, HTTPS/CSRF, local bootstrap, MFA, secure cookies, account separation, key permissions and persistent sync recovery after container restart.',
+    'Container smoke passed: read-only/non-root startup, migrations, health, HTTPS/CSRF, local bootstrap, MFA, secure cookies, account separation, key permissions and persistent sync recovery and idempotent round creation after container restart.',
   );
 } finally {
   if (started) docker('rm', '-f', name);

@@ -26,3 +26,7 @@ Beveiliging gaat boven functionaliteit. Markeer onvoltooide acceptatiecriteria e
 - Bewaar voortgang en diagnose bij herstart. Onderbroken draaiende taken worden gemarkeerd; alleen nog niet gestarte wachtrijtaken mogen normaal na herstart starten. Back-upherstel onderbreekt ook wachtrijtaken.
 - Behoud autorisatie, CSRF, brongoedkeuring, grenzen op URL/antwoordgrootte en veilige Nederlandse foutmeldingen. Toon nooit ruwe proxy-HTML, credentials of willekeurige transportfouten.
 - Test wijzigingen met virtueel langlopende taken, gelijktijdige starts, bronfouten, verloren werkleases/herstarts, HTTP-524/HTML en Playwright-polling. Laat de live bronproef alleen expliciet en éénmaal per relevante wijziging lopen om de cafetaria te ontzien.
+
+- Ronde-aanmaak hergebruikt uitsluitend de laatste geslaagde, integere momentopname van maximaal 30 minuten oud; een latere bronfout mag niet worden overgeslagen. Een gevulde ronde vereist vóór verzending altijd een nieuwe volledige broncontrole.
+- Handmatige ronde-aanvragen gebruiken een persistent aanvraag-ID met transactionele deduplicatie en een geautoriseerd herstel-statusendpoint. Herhaal onzekere POSTs nooit automatisch; gebruik hetzelfde ID bij een expliciete herhaling.
+- Bouw HTML-datums expliciet als YYYY-MM-DD uit kalenderdelen in Europe/Amsterdam; vertrouw niet op de weergavevolgorde van een locale zoals en-CA.

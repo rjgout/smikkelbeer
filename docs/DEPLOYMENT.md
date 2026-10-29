@@ -36,3 +36,5 @@ Het runtime-image is distroless (Node 24/Debian 13): geen shell, npm of package 
 ## Update voor achtergrond­synchronisatie
 
 Behoud het bestaande datavolume, haal het nieuwe geteste preview-image op en recreate de container. Migratie 004 behoudt bestaande catalogi en orders en voegt persistente synchronisatietaken toe. Ververs de beheerpagina na de update. Er zijn geen nieuwe functionele Compose-instellingen en geen hogere Cloudflare-timeouts nodig. Bronverzoeken blijven even voorzichtig gedoseerd. Zie MENU_SYNC.md voor diagnose, voortgang, foutcodes en herstartgedrag.
+
+Ronde-aanmaakherstel vereist het nieuwe image met migratie 005 én de nieuwe beheerbundel. Trek preview opnieuw op, recreate met behoud van /data en herlaad de beheerpagina volledig. Alleen een bijgewerkte PR of een oud image opnieuw starten installeert de fix niet. Controleer in de browser dat een verse menukaart tot een korte create-POST (201) leidt; een oudere menukaart levert 202 met voortgang op.

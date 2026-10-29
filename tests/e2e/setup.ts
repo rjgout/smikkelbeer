@@ -6,6 +6,7 @@ export default function setup() {
   try {
     db.exec('BEGIN IMMEDIATE');
     for (const table of [
+      'round_creation_requests',
       'menu_sync_jobs',
       'outbox',
       'inbox',

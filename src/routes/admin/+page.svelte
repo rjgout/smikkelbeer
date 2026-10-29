@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, ApiError, money, time, date, statusLabel } from '#lib/client';
+  import { api, ApiError, money, time, date, statusLabel, calendarDate } from '#lib/client';
   let data: any = $state(null),
     loading = $state(true),
     busy = $state(false),
@@ -25,7 +25,7 @@
     resolutionNote = $state(''),
     resolutionConfirmed = $state(false);
   let round = $state({
-    day: new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(new Date()),
+    day: calendarDate(),
     invite: '11:45',
     close: '12:00',
     send: '12:05',
@@ -78,6 +78,87 @@
     pollController: AbortController | undefined,
     nextPollAt = 0,
     pollFailures = 0;
+  let roundRequest: { requestId: string; signature: string; input: typeof round } | null =
+    $state(null);
+  let roundUncertain = $state(false);
+  function persistRoundRequest() {
+    try {
+      sessionStorage.setItem('smikkelbeer.round-request', JSON.stringify(roundRequest));
+    } catch {
+      /* Storage may be disabled; server idempotency remains in force for this page. */
+    }
+  }
+  async function showRoundResult(result: any) {
+    roundUncertain = false;
+    if (result.job) {
+      syncState = { ...syncState, job: result.job };
+      if (['failed', 'interrupted'].includes(result.job.status)) {
+        roundRequest = null;
+        persistRoundRequest();
+        failure = true;
+        message = syncMessage(result.job);
+      } else if (result.roundId) message = 'De ronde is aangemaakt en staat in het overzicht.';
+      else
+        message =
+          'De menukaart moet opnieuw worden gecontroleerd. De broncontrole loopt op de achtergrond; volg hieronder de voortgang.';
+    } else if (result.roundId)
+      message = 'De ronde is aangemaakt met een recente, volledig gecontroleerde menukaart.';
+    if (result.roundId) {
+      try {
+        const fresh = await api('admin', undefined, {
+          signal: pollController?.signal || AbortSignal.timeout(10000),
+        });
+        if (!disposed && data) {
+          data.rounds = fresh.rounds;
+          data.orders = fresh.orders;
+        }
+      } catch {
+        message =
+          'De ronde is aangemaakt. Het overzicht kon niet worden vernieuwd; herlaad de pagina.';
+      }
+    }
+  }
+  async function recoverRoundCreation() {
+    if (!roundRequest) return false;
+    try {
+      const result = await api('rounds/create/status?id=' + roundRequest.requestId, undefined, {
+        signal: pollController?.signal,
+      });
+      await showRoundResult(result);
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && e.httpStatus === 404) return false;
+      throw e;
+    }
+  }
+  async function startRound() {
+    const signature = JSON.stringify(round);
+    const oldJob = syncState?.job;
+    if (
+      roundRequest?.signature !== signature ||
+      (oldJob?.purpose === 'round.create' && ['failed', 'interrupted'].includes(oldJob.status))
+    ) {
+      roundRequest = { requestId: crypto.randomUUID(), signature, input: { ...round } };
+      persistRoundRequest();
+    }
+    const request = roundRequest!;
+    try {
+      if (roundUncertain && (await recoverRoundCreation())) return;
+      roundUncertain = true;
+      const result = await api('rounds/create', { ...request.input, requestId: request.requestId });
+      await showRoundResult(result);
+    } catch (e) {
+      if (e instanceof ApiError && (e.httpStatus === 0 || e.httpStatus >= 500)) {
+        if (e.requestId) syncLastReference = e.requestId;
+        try {
+          if (await recoverRoundCreation()) return;
+        } catch {
+          /* Polling retries the status, never the POST. */
+        }
+      } else roundUncertain = false;
+      throw e;
+    }
+  }
   const syncActive = $derived(['queued', 'running'].includes(syncState?.job?.status));
   const syncLabels: Record<string, string> = {
     queued: 'In wachtrij',
@@ -106,7 +187,7 @@
       polling ||
       !data ||
       (!can('menu') && !can('rounds')) ||
-      (!force && !syncActive && !syncUncertain) ||
+      (!force && !syncActive && !syncUncertain && !roundUncertain) ||
       (!force && Date.now() < nextPollAt)
     )
       return;
@@ -115,6 +196,12 @@
     const timeout = setTimeout(() => pollController?.abort(), 10000);
     const previous = syncState?.job;
     try {
+      if (roundUncertain && roundRequest) {
+        if (!(await recoverRoundCreation()))
+          syncPollError =
+            'De rondeaanvraag is nog niet geregistreerd. Klik opnieuw op Ronde aanmaken om met hetzelfde aanvraag-ID te proberen.';
+        return;
+      }
       const state = await api('menu/sync/status', undefined, { signal: pollController.signal });
       if (disposed) return;
       syncState = state;
@@ -128,6 +215,13 @@
         state.job &&
         !['queued', 'running'].includes(state.job.status)
       ) {
+        if (
+          state.job.purpose === 'round.create' &&
+          ['failed', 'interrupted'].includes(state.job.status)
+        ) {
+          roundRequest = null;
+          persistRoundRequest();
+        }
         message = syncMessage(state.job);
         failure = state.job.status !== 'succeeded';
         const fresh = await api('admin');
@@ -170,6 +264,16 @@
     }
   }
   onMount(() => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('smikkelbeer.round-request') || 'null');
+      if (stored?.requestId && stored?.signature && stored?.input) {
+        roundRequest = stored;
+        round = stored.input;
+        roundUncertain = true;
+      }
+    } catch {
+      /* Private browsing may deny storage access. */
+    }
     void load();
     const timer = setInterval(() => void pollSync(), 2000);
     return () => {
@@ -281,6 +385,9 @@
           onclick={() =>
             action(async () => {
               await api('logout', { kind: 'admin' });
+              roundRequest = null;
+              roundUncertain = false;
+              persistRoundRequest();
               data = null;
             }, false)}>Uitloggen →</button
         >
@@ -436,15 +543,23 @@
           </div>
         {:else if tab === 'rounds'}<section class="panel">
             <h2>Nieuwe bestelronde</h2>
+            {#if roundUncertain}<p role="status">
+                De uitkomst van rondeaanvraag {roundRequest?.requestId} wordt gecontroleerd. Opnieuw klikken
+                gebruikt hetzelfde aanvraag-ID.
+              </p>{/if}
+            {#if roundUncertain && syncPollError}<p class="error" role="alert">
+                {syncPollError}
+              </p>{/if}
             <p class="muted small">
-              De bron wordt vooraf volledig gecontroleerd. Dit kan enkele minuten duren.
+              Een volledig gecontroleerde menukaart van maximaal 30 minuten oud wordt direct
+              gebruikt. Anders volgt een afzonderlijke broncontrole met voortgang. Vóór verzending
+              wordt de bron altijd opnieuw gecontroleerd.
             </p>
             <form
               onsubmit={(e) => {
                 e.preventDefault();
-                action(async () => {
-                  await startSync('rounds/create', round);
-                });
+                if (busy || syncActive) return;
+                action(startRound, false);
               }}
             >
               <div class="form-grid">
