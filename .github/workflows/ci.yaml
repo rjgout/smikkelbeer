@@ -54,6 +54,10 @@ jobs:
           tags: smikkelbeer:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Verify restricted runtime
+        run: node scripts/smoke.mjs
+        env:
+          SMIKKEL_SMOKE_IMAGE: smikkelbeer:scan
       - name: Scan runtime image
         uses: aquasecurity/trivy-action@0.35.0
         with:

@@ -41,7 +41,7 @@ De stack heeft één niet-root applicatiecontainer, persistent `/data`, een alle
 
 ```sh
 docker compose up -d
-docker compose exec smikkelbeer node scripts/bootstrap.mjs
+docker compose exec smikkelbeer /nodejs/bin/node scripts/bootstrap.mjs
 ```
 
 Bezoek daarna `/setup` via HTTPS. Een nieuw datavolume genereert automatisch een encryptiesleutel. Database **en** sleutel moeten samen worden geback-upt.

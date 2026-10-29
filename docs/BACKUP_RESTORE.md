@@ -7,7 +7,7 @@ Een databasekopie zonder `master.key` kan versleutelde configuratie, TOTP en uit
 Het script gebruikt SQLite's online backup-API, geen onbetrouwbare live kopie van het hoofdbestand terwijl WAL actief is.
 
 ```sh
-docker compose exec smikkelbeer node scripts/backup.mjs /tmp/smikkel-backup
+docker compose exec smikkelbeer /nodejs/bin/node scripts/backup.mjs /tmp/smikkel-backup
 # Kopieer de map uit de container naar een beveiligde locatie voordat de container verdwijnt.
 docker cp CONTAINERNAAM:/tmp/smikkel-backup ./smikkel-backup
 ```
@@ -25,7 +25,7 @@ De back-up bevat `smikkelbeer.sqlite`, `master.key` en `manifest.json` met check
 ```sh
 docker run --rm --user 1000:1000 \
   -v NIEUW_VOLUME:/data -v /veilig/backup:/restore:ro \
-  --entrypoint node ghcr.io/rjgout/smikkelbeer:GEVERIFIEERDE_TAG \
+  --entrypoint /nodejs/bin/node ghcr.io/rjgout/smikkelbeer:GEVERIFIEERDE_TAG \
   scripts/restore.mjs /restore
 ```
 

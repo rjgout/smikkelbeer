@@ -18,3 +18,5 @@ Fixtures zijn gereduceerde publieke bronvoorbeelden van 29 oktober 2026, uitslui
 - Onafhankelijke beveiligingsreview en privacy-/organisatietoestemming.
 
 Zie de PR voor daadwerkelijk uitgevoerde resultaten. Tests gelden uitsluitend als geslaagd nadat ze zijn uitgevoerd.
+
+`npm run test:container` controleert het echte image: niet-root/read-only-start, migraties, healthcheck, weigeren van ontbrekende HTTPS-proxyheaders en CSRF, lokale bootstrap, TOTP, Secure/HttpOnly/SameSite-cookies, accountscheiding en bestandsrechten. Het gebruikt een afzonderlijk tijdelijk volume en geen externe mailprovider.

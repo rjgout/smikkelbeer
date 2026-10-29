@@ -13,7 +13,7 @@ De standaardstack gebruikt `ghcr.io/rjgout/smikkelbeer:preview`. Dit image besta
 3. Deploy de stack. De named volume krijgt UID 1000/GID 1000. Bij een bind mount moet je de map vooraf daarop zetten en chmod 0700 toepassen. De niet-root container wijzigt geen hostrechten.
 4. Verbind de bestaande reverse proxy op de NAS met `127.0.0.1:3080`. Alleen HTTPS publiceren. De proxy moet `X-Forwarded-Proto: https` en `X-Forwarded-Host: jouw.domein` overschrijven. Accepteer geen onbeheerde clientversies van die headers.
 5. Voor een tunnelcontainer op een apart netwerk: maak een gedeeld Docker-netwerk en routeer intern naar `smikkelbeer:3000`; publiceer poort 3000 niet algemeen. Pas netwerk-infrastructuur in de stack aan. Dit is netwerkconfiguratie, geen functionele applicatieconfiguratie.
-6. Portainer → container → Console, gebruiker 1000: `node scripts/bootstrap.mjs`. Kopieer de eenmalige code uitsluitend naar de eigen browser.
+6. Via de NAS-terminal (of Portainer met aangepaste Node-console), gebruiker 1000: `/nodejs/bin/node scripts/bootstrap.mjs`. Kopieer de eenmalige code uitsluitend naar de eigen browser.
 7. Open `https://jouw.domein/setup`. Maak beheeraccount, wachtwoord en TOTP. Koppel een tweede volledig beheerder zodra mogelijk.
 8. Beheer → Instellingen: werkelijke publieke URL, testontvangers, SMTP/IMAP, coördinator/cafetaria, planning en retentie instellen. Alle functionele instellingen blijven in de beveiligde website. Testmodus blijft aan.
 9. Beoordeel toestemming/voorwaarden van de bron, zet synchronisatie aan en controleer complete product-/optiedekking. De bron kan enkele minuten verwerking vereisen. Er worden geen bestellingen op de bronwebsite geplaatst.
@@ -30,3 +30,5 @@ Een oudere image gebruiken is alleen veilig als de databaseversie compatibel is.
 ## Diagnose
 
 `/api/health` controleert de database; het is geen volledige readinesscontrole van SMTP, bron of privacygoedkeuring. Gebruik Beheer → Diagnostiek en Auditlog. Bij verkeerde publieke URL kan een volledige beheerder eerst via de nog geldige origin instellingen corrigeren; bij DNS-verhuizing behoud je die origin tijdelijk. Er is bewust geen onbeveiligde URL-resetroute.
+
+Het runtime-image is distroless (Node 24/Debian 13): geen shell, npm of package manager. Gebruik in de NAS-terminal `docker compose exec smikkelbeer /nodejs/bin/node scripts/bootstrap.mjs`. In Portainer kan een aangepaste console `/nodejs/bin/node` openen; voer daar `await import('./scripts/bootstrap.mjs')` uit. Gebruik nooit een onbeveiligde webroute voor bootstrap.

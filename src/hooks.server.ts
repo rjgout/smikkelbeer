@@ -10,6 +10,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     const expected = new URL(settings().publicUrl).origin;
     if (
       event.url.protocol !== 'https:' ||
+      event.request.headers.get('x-forwarded-proto') !== 'https' ||
       (one('SELECT id FROM settings WHERE id=1') && event.url.origin !== expected)
     ) {
       if (event.url.pathname !== '/api/health') error(400, 'Gebruik de geconfigureerde HTTPS-URL');

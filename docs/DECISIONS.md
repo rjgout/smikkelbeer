@@ -12,3 +12,5 @@
 - Testmodus standaard aan, expliciete testontvangers en nooit het cafetaria-adres. Fictieve rondes gebruiken uitsluitend producten uit een echte bronmomentopname.
 - Eén replica: eenvoud voor Synology DS1520+, geen claim van HA. Scheduler/workerverdeling bij opschalen vereist aanvullend ontwerp.
 - GitHub Actions publiceert pas na type-, lint-, unit-, integratie-, browser-, dependency- en containerscans. Preview is geen productiecertificering.
+
+- Runtime: distroless Node 24 op Debian 13, zonder npm/shell/package manager. Het oorspronkelijke Debian 12-image had blokkerende OS- en meegeleverde npm-meldingen; de securitypoort is gehandhaafd. Beheerscripts worden rechtstreeks met `/nodejs/bin/node` uitgevoerd.

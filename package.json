@@ -16,7 +16,8 @@
     "test:e2e": "playwright test",
     "start": "node build",
     "bootstrap": "node scripts/bootstrap.mjs",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "test:container": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@sveltejs/adapter-node": "^6.0.0",

@@ -35,3 +35,5 @@ Meld beveiligingsproblemen privé aan de repository-eigenaar, nooit met secrets 
 ## Open dependencybevinding
 
 Na upgrade naar gepatchte hoofdversies blijft een low-severity `deepmerge`-melding (GHSA-gcqx-w48m-w2h4) in de Svelte Vite-buildketen over, met vier doorgegeven pakketmeldingen. Upstream heeft nog geen gepatchte versie. Hier wordt alleen vertrouwde buildconfiguratie gemerged, geen requestdata. Geen onveilige downgrade of onderdrukking toegepast: CI toont alle meldingen en blokkeert moderate/high/critical. Beoordeel dit restrisico vóór productie.
+
+De productiehook vereist expliciet `X-Forwarded-Proto: https`; de HTTPS-default van adapter-node zonder header wordt niet vertrouwd. Alleen de bestaande vertrouwde reverse proxy mag de container bereiken en deze header zetten. De container-smoketest controleert dat ontbrekende forwardingheaders worden geweigerd.
