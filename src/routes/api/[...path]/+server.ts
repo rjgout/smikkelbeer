@@ -18,13 +18,14 @@ import {
   permissions,
 } from '#lib/server/auth';
 import { settings, publicSettings, saveSettings } from '#lib/server/config';
-import { syncMenu, syncHistory } from '#lib/server/menu';
+import { syncHistory } from '#lib/server/menu';
+import { MenuSyncError, enqueueMenuSync, menuSyncStatus } from '#lib/server/menu-jobs';
 import { invite, enqueue, escape, renderOrder, pollInbox } from '#lib/server/mail';
 import {
-  createRound,
+  validateNewRound,
   saveOrder,
   updateTimes,
-  finalizeRound,
+  queueValidatedRound,
   frozenOrders,
 } from '#lib/server/orders';
 import { passwordHash, encrypt } from '#lib/server/crypto';
@@ -97,6 +98,7 @@ function dashboard(e: RequestEvent) {
     admins: can('roles') ? all('SELECT id,email,role_id,active FROM admins') : [],
     permissions: can('roles') ? permissions : [],
     syncs: can('menu') ? syncHistory() : [],
+    syncStatus: can('menu') || can('rounds') ? menuSyncStatus() : null,
     mail: can('mail')
       ? all(
           'SELECT id,round_id,recipient,subject,kind,status,created,error FROM outbox ORDER BY created DESC LIMIT 100',
@@ -150,6 +152,18 @@ export async function GET(event: RequestEvent) {
     });
   }
   if (path === 'admin') return json(dashboard(event));
+  if (path === 'menu/sync/status') {
+    const admin = requireAdmin(event);
+    if (!admin.permissions.some((p) => ['*', 'menu', 'rounds'].includes(p)))
+      error(403, 'Geen rechten om synchronisaties te bekijken');
+    const id = event.url.searchParams.get('id') || undefined;
+    if (id && !z.uuid().safeParse(id).success)
+      return json({ message: 'Ongeldige synchronisatie-ID.' }, { status: 400 });
+    const state = menuSyncStatus(id);
+    if (id && !state.job)
+      return json({ message: 'Deze synchronisatietaak bestaat niet.' }, { status: 404 });
+    return json(state);
+  }
   if (path?.startsWith('round/')) {
     requireAdmin(event, 'rounds');
     const r = one('SELECT * FROM rounds WHERE id=?', path.slice(6));
@@ -162,6 +176,14 @@ export async function POST(event: RequestEvent) {
   try {
     return await post(event);
   } catch (e) {
+    if (e instanceof MenuSyncError)
+      return json(
+        { message: e.message, code: e.code, retryAfter: e.retryAfter },
+        {
+          status: e.httpStatus,
+          headers: e.retryAfter ? { 'Retry-After': String(e.retryAfter) } : {},
+        },
+      );
     if (e instanceof z.ZodError)
       return json({ message: e.issues.map((i) => i.message).join('; ') }, { status: 400 });
     if (e && typeof e === 'object' && 'status' in e) throw e;
@@ -310,12 +332,20 @@ async function post(event: RequestEvent) {
   }
   if (p === 'menu/sync') {
     const a = requireAdmin(event, 'menu');
-    const r = await syncMenu(a.id);
-    return json({ count: r.products.length });
+    const result = enqueueMenuSync(a.id);
+    return json(result, {
+      status: 202,
+      headers: { Location: '/api/menu/sync/status?id=' + result.job.id, 'Retry-After': '2' },
+    });
   }
   if (p === 'rounds/create') {
     const a = requireAdmin(event, 'rounds');
-    return json({ id: await createRound(v, a.id) });
+    const { v: input } = validateNewRound(v);
+    const result = enqueueMenuSync(a.id, 'round.create', input, false);
+    return json(result, {
+      status: 202,
+      headers: { Location: '/api/menu/sync/status?id=' + result.job.id, 'Retry-After': '2' },
+    });
   }
   if (p === 'rounds/times') {
     const a = requireAdmin(event, 'rounds');
@@ -337,9 +367,19 @@ async function post(event: RequestEvent) {
   if (p === 'rounds/recheck') {
     const a = requireAdmin(event, 'rounds');
     const id = z.string().uuid().parse(v.id);
-    await finalizeRound(id);
+    const r = one('SELECT * FROM rounds WHERE id=?', id);
+    if (!r || !['closed', 'blocked'].includes(r.status) || Date.now() < r.sends)
+      error(409, 'De ronde is niet gereed voor een nieuwe broncontrole');
+    if (!frozenOrders(id).length) {
+      queueValidatedRound(id, r.digest);
+      return json({ ok: true });
+    }
+    const result = enqueueMenuSync(a.id, 'round.validate', { roundId: id }, false);
     audit(a.id, 'round.recheck', id);
-    return json({ ok: true });
+    return json(result, {
+      status: 202,
+      headers: { Location: '/api/menu/sync/status?id=' + result.job.id, 'Retry-After': '2' },
+    });
   }
   if (p === 'rounds/resolve') {
     const a = requireAdmin(event, 'rounds');

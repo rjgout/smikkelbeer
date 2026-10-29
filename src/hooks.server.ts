@@ -1,10 +1,14 @@
 import { error } from '@sveltejs/kit';
 import type { Handle } from '@sveltejs/kit/hooks';
 import { building, dev } from '$app/env';
+import { startMenuSyncWorker } from '#lib/server/menu';
 import { startScheduler } from '#lib/server/scheduler';
 import { one } from '#lib/server/db';
 import { settings } from '#lib/server/config';
-if (!building) startScheduler();
+if (!building) {
+  startMenuSyncWorker();
+  startScheduler();
+}
 export const handle: Handle = async ({ event, resolve }) => {
   if (!dev && !building) {
     const expected = new URL(settings().publicUrl).origin;

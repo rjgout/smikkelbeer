@@ -1,16 +1,60 @@
-export async function api(path: string, data?: unknown) {
-  const r = await fetch(
-    '/api/' + path,
-    data === undefined
-      ? {}
-      : {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(data),
-        },
-  );
-  const value = await r.json();
-  if (!r.ok) throw new Error(value.message || 'Deze actie is niet gelukt');
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public httpStatus: number,
+    public code: string,
+    public requestId?: string,
+  ) {
+    super(message);
+  }
+}
+export async function api(path: string, data?: unknown, options: { signal?: AbortSignal } = {}) {
+  let r: Response;
+  try {
+    r = await fetch('/api/' + path, {
+      ...(data === undefined ? {} : { method: 'POST', body: JSON.stringify(data) }),
+      headers: {
+        Accept: 'application/json',
+        ...(data === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      signal: options.signal,
+    });
+  } catch {
+    throw new ApiError(
+      'De verbinding is onderbroken of het verzoek duurde te lang. Een gestarte achtergrondtaak kan nog doorlopen; haal de status opnieuw op.',
+      0,
+      'NETWORK',
+    );
+  }
+  const rawRay = r.headers.get('cf-ray');
+  const ray = rawRay && /^[a-zA-Z0-9-]{1,80}$/.test(rawRay) ? rawRay : undefined;
+  const timeout = [408, 504, 524].includes(r.status);
+  const proxyMessage = timeout
+    ? 'De verbinding via de proxy is verlopen (HTTP ' +
+      r.status +
+      '). Een gestarte synchronisatie kan nog op de achtergrond doorlopen. Haal de status opnieuw op.'
+    : 'De server of proxy gaf geen bruikbaar antwoord (HTTP ' +
+      r.status +
+      '). Probeer de status opnieuw op te halen.';
+  let value: any;
+  if (!/^application\/(?:[a-z0-9.-]+\+)?json(?:;|$)/i.test(r.headers.get('content-type') || ''))
+    throw new ApiError(proxyMessage, r.status, timeout ? 'PROXY_TIMEOUT' : 'INVALID_RESPONSE', ray);
+  try {
+    value = await r.json();
+  } catch {
+    throw new ApiError(proxyMessage, r.status, 'INVALID_JSON', ray);
+  }
+  if (!r.ok)
+    throw new ApiError(
+      r.status >= 500
+        ? proxyMessage
+        : typeof value?.message === 'string'
+          ? value.message
+          : 'Deze actie is niet gelukt.',
+      r.status,
+      value?.code || 'REQUEST_FAILED',
+      ray,
+    );
   return value;
 }
 export const money = (cents: number) =>

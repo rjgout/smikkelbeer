@@ -33,3 +33,13 @@ Zie de PR voor daadwerkelijk uitgevoerde resultaten. Tests gelden uitsluitend al
 De laatste commit wordt opnieuw in GitHub Actions gecontroleerd vóór image-publicatie. Definitieve run- en imageverwijzingen staan in de PR; een lokale eerdere test is geen bewijs voor een latere gewijzigde commit.
 
 Aanvullende regressies controleren atomische sleutelinitialisatie, behoud van bestaande sleutels, weigeren van symlinks/corrupte bestanden en de publicatiepoort bij een hoge CodeQL-SARIF-bevinding of ontbrekend scanresultaat.
+
+## Achtergrond­synchronisatie-regressies
+
+De aanvullende suites controleren HTTP-202-start en statusautorisatie, gelijktijdige starts/SQLite-exclusiviteit, cooldown, ingestelde vertraging, publicatie na volledigheid, behoud van eerdere catalogi/ronde-snapshots, bronfouten/timeoutredactie, ingetrokken bronrechten, queue/lease/herstart/herstel, verlopen ronde-opdrachten en ingetrokken beheerrechten. Een taak met 213 producten wordt met virtuele tijd voorbij Cloudflares normale requestvenster gevolgd; de HTTP-start is dan al afgerond en status blijft beschikbaar.
+
+Client- en Playwright-tests simuleren Cloudflare 502/504/524-HTML, ongeldige JSON, een onzekere startrespons, voortgang na herladen en herstel van polling zonder dubbele POST. Playwright gebruikt een eigen database en wist alleen zijn geïsoleerde testgegevens tussen runs.
+
+De expliciete live bronproef doorloopt nu dezelfde persistente worker en atomische publicatie op een tijdelijke database. Hij gebruikt uitsluitend read-only verzoeken met minimaal de productievertraging; hij configureert geen SMTP/IMAP en plaatst geen cafetariabestelling. Uitvoeren: `SMIKKEL_LIVE_SOURCE=1 npx vitest run tests/live-source.test.ts`. Zie de PR voor actuele aantallen en CI-resultaten; oudere resultaten hierboven horen bij de oorspronkelijke implementatie.
+
+Uitgevoerd voor de synchronisatieherziening op 29 oktober 2026: 76 unit-/integratietests geslaagd (de afzonderlijke live proef is standaard overgeslagen), 33 Playwright-tests geslaagd over de drie browserprojecten en een expliciete live workerproef geslaagd voor 213 producten/211 beschikbare optievensters in 274.763 ms. Typecontrole, lint, productie-/Docker-build en de echte container-herstartproef zijn eveneens geslaagd. De regressies omvatten bronwerk voorbij 125 seconden zonder open startrequest; proxy-time-outs worden gesimuleerd zonder Cloudflare of de cafetaria extra te belasten. GitHub Actions controleert de gepushte commit opnieuw vóór publicatie.

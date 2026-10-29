@@ -94,6 +94,7 @@ beforeEach(() => {
   vi.useRealTimers();
   db.exec('PRAGMA foreign_keys=OFF; DROP TRIGGER IF EXISTS protect_last_admin_delete;');
   for (const table of [
+    'menu_sync_jobs',
     'jobs',
     'outbox',
     'inbox',
@@ -122,7 +123,7 @@ afterAll(() => {
 });
 describe('migrations, encryption and configuration', () => {
   it('applies migrations and enforces foreign keys', () => {
-    expect(one('SELECT count(*) n FROM migrations').n).toBe(3);
+    expect(one('SELECT count(*) n FROM migrations').n).toBe(4);
     expect(() => run('INSERT INTO favorites VALUES (?,?)', 'missing', '85')).toThrow();
   });
   it('authenticated encryption rejects tampering and stores no plaintext config', () => {

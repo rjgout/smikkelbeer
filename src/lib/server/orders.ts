@@ -31,17 +31,38 @@ export function roundTimes(input: z.infer<typeof roundInput>) {
     throw new Error('Controleer tijdvolgorde en voorbereidingstijd');
   return { opens, closes, sends, arrives };
 }
+export function validateNewRound(input: unknown) {
+  const v = roundInput.parse(input),
+    times = roundTimes(v);
+  if (times.closes <= Date.now()) throw new Error('Sluiting ligt in het verleden');
+  if (
+    one(
+      "SELECT id FROM rounds WHERE opens<? AND closes>? AND status NOT IN ('cancelled','completed')",
+      times.closes,
+      times.opens,
+    )
+  )
+    throw new Error('Bestelvensters mogen niet overlappen');
+  return { v, times };
+}
 export async function createRound(
   input: unknown,
   actor: string,
   synchronize = true,
   automatic = false,
 ) {
-  const v = roundInput.parse(input),
-    s = settings();
-  const times = roundTimes(v);
-  if (times.closes <= Date.now()) throw new Error('Sluiting ligt in het verleden');
+  const { v } = validateNewRound(input);
   const menu = synchronize ? await syncMenu(actor) : latestMenu();
+  return createRoundFromMenu(v, actor, menu, automatic);
+}
+export function createRoundFromMenu(
+  input: unknown,
+  actor: string,
+  menu: { products: Product[]; digest: string },
+  automatic = false,
+) {
+  const { v, times } = validateNewRound(input),
+    s = settings();
   const id = randomUUID(),
     number = 'SB-' + v.day.replaceAll('-', '') + '-' + id.slice(0, 6).toUpperCase();
   transaction(() => {

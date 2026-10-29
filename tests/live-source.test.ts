@@ -1,60 +1,68 @@
 import { it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-// Explicit read-only contract check. Never used to populate the application.
+import { setTimeout as sleep } from 'node:timers/promises';
+// Explicit read-only contract/worker test. Never uses the live application's DB.
 it.skipIf(process.env.SMIKKEL_LIVE_SOURCE !== '1')(
-  'validates every currently available official source product and its options',
+  'validates and atomically publishes every available official source option through a background job',
   async () => {
     const directory = mkdtempSync(resolve(tmpdir(), 'smikkel-source-'));
     process.env.DATA_DIR = directory;
-    const { parseMenu, parseOptions } = await import('../src/lib/server/menu');
-    const { db } = await import('../src/lib/server/db');
-    const read = (path: string) =>
-      execFileSync(
-        'curl',
-        [
-          '--fail',
-          '--silent',
-          '--show-error',
-          '--location',
-          '--max-redirs',
-          '0',
-          '--max-time',
-          '20',
-          '--max-filesize',
-          '2000000',
-          'https://www.hetcentrummarum.nl' + path,
-        ],
-        { encoding: 'utf8', maxBuffer: 2000000 },
-      );
+    const { processMenuSyncJobs } = await import('../src/lib/server/menu');
+    const { enqueueMenuSync, menuSyncStatus } = await import('../src/lib/server/menu-jobs');
+    const { defaults, saveSettings } = await import('../src/lib/server/config');
+    const { db, one } = await import('../src/lib/server/db');
     try {
-      const products = parseMenu(read('/'));
-      expect(products.length).toBeGreaterThan(0);
-      let checked = 0;
-      for (const product of products) {
-        if (!product.available) continue;
-        await new Promise((r) => setTimeout(r, 1100));
-        try {
-          product.options = parseOptions(read('/order/product/add/' + product.id), product.id);
-        } catch (e) {
-          throw new Error(
-            'Official source product ' +
-              product.id +
-              ': ' +
-              (e instanceof Error ? e.message : 'invalid options'),
-          );
-        }
-        checked++;
-      }
-      console.log(
-        'Official source products: ' +
-          products.length +
-          '; available option forms verified: ' +
-          checked,
+      saveSettings(
+        { ...structuredClone(defaults), scrapingApproved: true, weekdays: [] },
+        'source-probe',
       );
-      expect(checked).toBeGreaterThan(0);
+      const { job } = enqueueMenuSync('source-probe');
+      const start = Date.now();
+      await processMenuSyncJobs({
+        read: async (path, signal) => {
+          signal.throwIfAborted();
+          if (path !== '/' && !/^\/order\/product\/add\/\d+$/.test(path))
+            throw new Error('Invalid source path');
+          return execFileSync(
+            'curl',
+            [
+              '--fail',
+              '--silent',
+              '--show-error',
+              '--location',
+              '--max-redirs',
+              '0',
+              '--max-time',
+              '20',
+              '--max-filesize',
+              '2000000',
+              'https://www.hetcentrummarum.nl' + path,
+            ],
+            { encoding: 'utf8', maxBuffer: 2000000 },
+          );
+        },
+        delay: (ms, signal) => sleep(ms, undefined, { signal }),
+      });
+      const status = menuSyncStatus(job.id).job!;
+      expect(status.error).toBeNull();
+      expect(status.status).toBe('succeeded');
+      expect(status.processed).toBe(status.total);
+      expect(status.total).toBeGreaterThan(0);
+      const catalog = JSON.parse(
+        one('SELECT products FROM syncs WHERE id=?', status.syncId).products,
+      );
+      const evidence = {
+        status: status.status,
+        products: catalog.length,
+        available: catalog.filter((p: any) => p.available).length,
+        elapsedMs: Date.now() - start,
+      };
+      writeFileSync('/tmp/smikkel-live-sync-evidence.json', JSON.stringify(evidence, null, 2));
+      expect(catalog.length).toBe(status.total);
+      expect(one('SELECT count(*) count FROM outbox').count).toBe(0);
     } finally {
       db.close();
       rmSync(directory, { recursive: true, force: true });

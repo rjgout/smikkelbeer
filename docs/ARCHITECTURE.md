@@ -27,3 +27,7 @@ Twee afzonderlijke sessiecookies en identiteitstypen. Geen enkele beheerdersrol 
 Elke 30 seconden binnen hetzelfde proces: rondes starten/sluiten, uitnodigingen en twee optionele herinneringen, verzenden en waarschuwingen. Netwerkoperaties draaien buiten database-transacties. Geen meerdere replica's of meerdere workers op één datavolume. Gemiste deadlines worden bij hervatten verwerkt; uitgevallen uitnodigingsmomenten worden niet naar het verleden verschoven.
 
 Bronaanvragen: vaste host/paden, geen configureerbare URL, minimaal één seconde tussen productvensters, één synchronisatie tegelijk en minimaal één minuut tussen pogingen. SMTP/IMAP gebruiken publiek IPv4, DNS-pinning per verbinding, TLS-hostnaamvalidatie en TLS 1.2+. Interne mailrelays/IPv6-only-providers hebben een apart beoordeelde adapter nodig.
+
+## Persistente menukaartworker
+
+Menukaartsynchronisaties en afhankelijke handmatige ronde-acties verlaten de HTTP-requestketen via een SQLite-taak met HTTP 202 en een apart statusendpoint. De worker draait in hetzelfde applicatieproces, met database-exclusiviteit, heartbeat/werklease, fencing en atomische publicatie van uitsluitend volledige catalogi. De browser pollt de taak en kan herladen of sluiten. Zie MENU_SYNC.md voor protocol, toestandsovergangen, foutgrenzen en herstel. Dit voegt geen container, externe queue of functionele omgevingsvariabelen toe.

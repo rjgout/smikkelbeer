@@ -43,3 +43,5 @@ De automatische planning synchroniseert standaard 30 minuten vóór de uitnodigi
 Meervoudige identieke verplichte sauskeuzes in bronpakketten blijven afzonderlijke keuzes, ook met dezelfde bronoptie-IDs. Voorbereidingstijd wordt na de broncontrole én direct vóór SMTP opnieuw gecontroleerd. Een bestaand bestelmailrecord wordt nooit automatisch opnieuw klaargezet. Testidentiteit blijft per uitgaand bericht bewaard bij latere modus- of ontvangerwijzigingen.
 
 Een onbeoordeelde inkomende reactie onderdrukt de waarschuwing bij ontbrekende ontvangstbevestiging niet. Alleen daadwerkelijk bevestigde of afgehandelde rondes verlaten deze controle.
+
+Menukaart synchroniseren start nu een achtergrondtaak. De beheerpagina toont aantal verwerkte/totale producten en pollt een afzonderlijk statusendpoint; het scherm mag worden gesloten. Ook handmatig een ronde maken of de bron opnieuw controleren is asynchroon. Bij herstart wordt een verdwenen worker met voortgang als onderbroken getoond zodra zijn lease is verlopen; niet blind opnieuw klikken bij een proxyfout. Wacht op de status en de cooldown. Zie MENU_SYNC.md voor de volledige Cloudflare-diagnose en herstelprocedure.

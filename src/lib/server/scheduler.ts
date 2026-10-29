@@ -158,7 +158,14 @@ export function retain(days: number) {
       cutoff,
     );
     run('DELETE FROM audit WHERE at<?', cutoff);
-    run('DELETE FROM syncs WHERE at<?', cutoff);
+    run(
+      "DELETE FROM menu_sync_jobs WHERE finished<? AND status NOT IN ('queued','running')",
+      cutoff,
+    );
+    run(
+      'DELETE FROM syncs WHERE at<? AND id NOT IN (SELECT sync_id FROM menu_sync_jobs WHERE sync_id IS NOT NULL)',
+      cutoff,
+    );
   });
 }
 let timer: ReturnType<typeof setInterval> | undefined;

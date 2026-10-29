@@ -32,3 +32,7 @@ Een oudere image gebruiken is alleen veilig als de databaseversie compatibel is.
 `/api/health` controleert de database; het is geen volledige readinesscontrole van SMTP, bron of privacygoedkeuring. Gebruik Beheer → Diagnostiek en Auditlog. Bij verkeerde publieke URL kan een volledige beheerder eerst via de nog geldige origin instellingen corrigeren; bij DNS-verhuizing behoud je die origin tijdelijk. Er is bewust geen onbeveiligde URL-resetroute.
 
 Het runtime-image is distroless (Node 24/Debian 13): geen shell, npm of package manager. Gebruik in de NAS-terminal `docker compose exec smikkelbeer /nodejs/bin/node scripts/bootstrap.mjs`. In Portainer kan een aangepaste console `/nodejs/bin/node` openen; voer daar `await import('./scripts/bootstrap.mjs')` uit. Gebruik nooit een onbeveiligde webroute voor bootstrap.
+
+## Update voor achtergrond­synchronisatie
+
+Behoud het bestaande datavolume, haal het nieuwe geteste preview-image op en recreate de container. Migratie 004 behoudt bestaande catalogi en orders en voegt persistente synchronisatietaken toe. Ververs de beheerpagina na de update. Er zijn geen nieuwe functionele Compose-instellingen en geen hogere Cloudflare-timeouts nodig. Bronverzoeken blijven even voorzichtig gedoseerd. Zie MENU_SYNC.md voor diagnose, voortgang, foutcodes en herstartgedrag.

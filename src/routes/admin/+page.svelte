@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, money, time, date, statusLabel } from '#lib/client';
+  import { api, ApiError, money, time, date, statusLabel } from '#lib/client';
   let data: any = $state(null),
     loading = $state(true),
     busy = $state(false),
@@ -60,6 +60,7 @@
   async function load() {
     try {
       data = await api('admin');
+      syncState = data.syncStatus;
     } catch (e) {
       if (e instanceof Error && !e.message.includes('Log in')) {
         failure = true;
@@ -68,7 +69,115 @@
     }
     loading = false;
   }
-  onMount(load);
+  let syncState: any = $state(null),
+    syncPollError = $state(''),
+    syncLastReference = $state(''),
+    syncUncertain = $state(false);
+  let polling = false,
+    disposed = false,
+    pollController: AbortController | undefined,
+    nextPollAt = 0,
+    pollFailures = 0;
+  const syncActive = $derived(['queued', 'running'].includes(syncState?.job?.status));
+  const syncLabels: Record<string, string> = {
+    queued: 'In wachtrij',
+    running: 'Bezig',
+    succeeded: 'Geslaagd',
+    failed: 'Mislukt',
+    interrupted: 'Onderbroken',
+  };
+  const syncTitles: Record<string, string> = {
+    menu: 'Menukaartsynchronisatie',
+    'round.create': 'Broncontrole en ronde voorbereiden',
+    'round.validate': 'Broncontrole vóór verzending',
+  };
+  function syncMessage(job: any) {
+    return job.status === 'succeeded'
+      ? job.purpose === 'menu'
+        ? job.total + ' producten volledig gecontroleerd.'
+        : job.purpose === 'round.create'
+          ? 'Menukaart gecontroleerd; de nieuwe ronde staat in het overzicht.'
+          : 'Menukaart gecontroleerd; bekijk de verzendstatus van de ronde.'
+      : job.error?.message || 'De synchronisatie is onderbroken.';
+  }
+  async function pollSync(force = false) {
+    if (
+      disposed ||
+      polling ||
+      !data ||
+      (!can('menu') && !can('rounds')) ||
+      (!force && !syncActive && !syncUncertain) ||
+      (!force && Date.now() < nextPollAt)
+    )
+      return;
+    polling = true;
+    pollController = new AbortController();
+    const timeout = setTimeout(() => pollController?.abort(), 10000);
+    const previous = syncState?.job;
+    try {
+      const state = await api('menu/sync/status', undefined, { signal: pollController.signal });
+      if (disposed) return;
+      syncState = state;
+      syncPollError = '';
+      syncUncertain = false;
+      pollFailures = 0;
+      nextPollAt = 0;
+      if (
+        previous &&
+        ['queued', 'running'].includes(previous.status) &&
+        state.job &&
+        !['queued', 'running'].includes(state.job.status)
+      ) {
+        message = syncMessage(state.job);
+        failure = state.job.status !== 'succeeded';
+        const fresh = await api('admin');
+        if (!disposed && data) {
+          data.rounds = fresh.rounds;
+          data.orders = fresh.orders;
+          data.syncs = fresh.syncs;
+        }
+      }
+    } catch (e) {
+      if (disposed) return;
+      syncPollError = e instanceof Error ? e.message : 'De status kon niet worden opgehaald.';
+      if (e instanceof ApiError && e.requestId) syncLastReference = e.requestId;
+      pollFailures++;
+      nextPollAt = Date.now() + Math.min(15000, 2000 * 2 ** Math.min(pollFailures, 3));
+    } finally {
+      clearTimeout(timeout);
+      polling = false;
+      pollController = undefined;
+    }
+  }
+  async function startSync(path = 'menu/sync', payload: unknown = {}) {
+    syncPollError = '';
+    syncLastReference = '';
+    try {
+      const r = await api(path, payload);
+      if (r.job) {
+        syncState = { ...syncState, job: r.job };
+        message = r.reused
+          ? 'De bestaande synchronisatie wordt gevolgd.'
+          : 'Broncontrole gestart. Je kunt dit scherm sluiten; de taak loopt op de server door.';
+      } else message = 'Ronde afgehandeld.';
+    } catch (e) {
+      if (e instanceof ApiError && (e.httpStatus === 0 || e.httpStatus >= 500)) {
+        syncUncertain = true;
+        if (e.requestId) syncLastReference = e.requestId;
+        await pollSync(true);
+      }
+      throw e;
+    }
+  }
+  onMount(() => {
+    void load();
+    const timer = setInterval(() => void pollSync(), 2000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      pollController?.abort();
+    };
+  });
   async function action(fn: () => Promise<void>, refresh = true) {
     busy = true;
     message = '';
@@ -80,6 +189,7 @@
     } catch (e) {
       failure = true;
       message = e instanceof Error ? e.message : 'Actie mislukt';
+      if (e instanceof ApiError && e.requestId) message += ' Cloudflare-referentie: ' + e.requestId;
     } finally {
       busy = false;
     }
@@ -193,6 +303,51 @@
           <span class="pill">Europe/Amsterdam</span>
         </div>
         {#if message}<div class:danger={failure} class="notice" role="status">{message}</div>{/if}
+        {#if (can('menu') || can('rounds')) && (syncState?.job || syncUncertain)}
+          <section class="panel sync-progress" aria-label="Synchronisatiestatus">
+            <div class="section-heading">
+              <h2>{syncTitles[syncState?.job?.purpose] || 'Menukaartsynchronisatie'}</h2>
+              <span class="pill">{syncLabels[syncState?.job?.status] || 'Status opvragen'}</span>
+            </div>
+            {#if syncState?.job}{@const job = syncState.job}
+              <progress
+                aria-label="Gecontroleerde producten"
+                value={job.processed}
+                max={Math.max(1, job.total)}
+              ></progress>
+              <p role="status">
+                {job.total
+                  ? job.processed + ' van ' + job.total + ' producten gecontroleerd.'
+                  : job.status === 'queued'
+                    ? 'De taak wacht op verwerking.'
+                    : job.status === 'running'
+                      ? 'De menukaart wordt opgehaald.'
+                      : 'Er zijn nog geen producten gecontroleerd.'}
+              </p>
+              {#if job.phase === 'applying' && syncActive}<p>
+                  Alle producten zijn gecontroleerd; de ronde wordt verwerkt.
+                </p>{/if}
+              {#if job.error}<p class="notice danger" role="alert">{job.error.message}</p>
+                <small
+                  >Diagnose: {job.error.code}{job.error.productId
+                    ? ' · bronproduct ' + job.error.productId
+                    : ''}</small
+                >{/if}
+              <p class="muted small">
+                Taak {job.id} · bijgewerkt {date(job.updatedAt)}. Een fout of onderbreking
+                overschrijft geen geldige ronde-momentopnamen.
+              </p>
+            {/if}
+            {#if syncState?.lastSuccess}<p class="muted small">
+                Laatste volledig geslaagde broncontrole: {date(syncState.lastSuccess.at)}.
+              </p>{/if}
+            {#if syncPollError}<p class="notice danger" role="alert">{syncPollError}</p>{/if}
+            {#if syncLastReference}<p class="muted small">
+                Laatste Cloudflare-referentie: {syncLastReference}
+              </p>{/if}
+            <button class="secondary" onclick={() => pollSync(true)}>Status opnieuw ophalen</button>
+          </section>
+        {/if}
         {#if tab === 'dashboard'}<div class="stats-grid">
             <article class="stat">
               <span>Huidige ronde</span><strong
@@ -288,8 +443,7 @@
               onsubmit={(e) => {
                 e.preventDefault();
                 action(async () => {
-                  await api('rounds/create', round);
-                  message = 'Ronde aangemaakt met een vaste menukaartmomentopname.';
+                  await startSync('rounds/create', round);
                 });
               }}
             >
@@ -307,8 +461,12 @@
                   ></label
                 >
               </div>
-              <button class="primary" disabled={busy}
-                >{busy ? 'Bezig met broncontrole…' : 'Ronde aanmaken'}</button
+              <button class="primary" disabled={busy || syncActive}
+                >{syncActive
+                  ? 'Broncontrole loopt…'
+                  : busy
+                    ? 'Opdracht starten…'
+                    : 'Ronde aanmaken'}</button
               >
             </form>
           </section>
@@ -368,7 +526,7 @@
                             disabled={busy}
                             onclick={() =>
                               action(async () => {
-                                await api('rounds/recheck', { id: r.id });
+                                await startSync('rounds/recheck', { id: r.id });
                               })}>Bron opnieuw controleren</button
                           >{/if}
                       </div></td
@@ -634,13 +792,11 @@
             </p>
             <button
               class="primary"
-              disabled={busy}
+              disabled={busy || syncActive}
               onclick={() =>
                 action(async () => {
-                  const r = await api('menu/sync', {});
-                  message = r.count + ' bronproducten gecontroleerd.';
-                })}
-              >{busy ? 'Bronproducten en opties controleren…' : 'Menukaart synchroniseren'}</button
+                  await startSync();
+                })}>{syncActive ? 'Synchronisatie loopt…' : 'Menukaart synchroniseren'}</button
             >
           </section>
           <div class="panel table-wrap">

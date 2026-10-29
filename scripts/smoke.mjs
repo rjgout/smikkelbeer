@@ -1,7 +1,7 @@
 // Verify the built runtime with the same container restrictions as Compose.
 // Uses isolated disposable data and never configures an external mail provider.
 import { execFileSync } from 'node:child_process';
-import { randomBytes, createHmac } from 'node:crypto';
+import { randomBytes, createHmac, randomUUID } from 'node:crypto';
 import { strict as assert } from 'node:assert';
 
 const image = process.env.SMIKKEL_SMOKE_IMAGE || 'smikkelbeer:local';
@@ -38,7 +38,7 @@ try {
   );
   started = true;
   const port = JSON.parse(docker('inspect', name))[0].NetworkSettings.Ports['3000/tcp'][0].HostPort;
-  const base = 'http://127.0.0.1:' + port;
+  let base = 'http://127.0.0.1:' + port;
   let healthy = false;
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
@@ -128,8 +128,81 @@ try {
     docker('exec', name, '/nodejs/bin/node', '-e', 'console.log(process.getuid())').trim(),
     '1000',
   );
+  // A real container restart must preserve and interrupt an expired worker lease.
+  // The job is already 'running'; it is never eligible for a new source request.
+  const interruptedId = randomUUID();
+  docker(
+    'exec',
+    name,
+    '/nodejs/bin/node',
+    '-e',
+    "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/data/smikkelbeer.sqlite');const now=Date.now();db.prepare(\"INSERT INTO menu_sync_jobs(id,status,phase,actor,purpose,test,delay_ms,processed,total,created,updated,started,lease_owner,lease_until) VALUES (?,'running','options','old-worker','menu',1,1000,80,213,?,?,?,'dead-worker',?)\").run(process.argv[1],now,now,now,now+2000);db.close();",
+    interruptedId,
+  );
+  docker('restart', name);
+  // Docker may reassign an ephemeral host port after restart.
+  base =
+    'http://127.0.0.1:' +
+    JSON.parse(docker('inspect', name))[0].NetworkSettings.Ports['3000/tcp'][0].HostPort;
+  let recovered = false,
+    lastHttp = 0,
+    lastState,
+    lastEnvelope,
+    lastContentType = '',
+    lastBodyLength = 0,
+    lastParse = '';
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const response = await req('menu/sync/status?id=' + interruptedId, undefined, cookie);
+      lastHttp = response.status;
+      if (response.ok) {
+        lastContentType = response.headers.get('content-type') || '';
+        const text = await response.text();
+        lastBodyLength = text.length;
+        try {
+          lastEnvelope = JSON.parse(text);
+          lastState = lastEnvelope?.job;
+        } catch {
+          lastParse = 'invalid-json';
+        }
+      }
+    } catch {}
+    if (lastState?.status === 'interrupted') {
+      assert.equal(lastState.processed, 80);
+      assert.equal(lastState.total, 213);
+      assert.equal(lastState.error.code, 'PROCESS_INTERRUPTED');
+      recovered = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!recovered) {
+    console.log('Status response keys:', Object.keys(lastEnvelope || {}), {
+      lastContentType,
+      lastBodyLength,
+      lastParse,
+    });
+    console.log(
+      'Stored sync state:',
+      docker(
+        'exec',
+        name,
+        '/nodejs/bin/node',
+        '-e',
+        "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/data/smikkelbeer.sqlite');console.log(JSON.stringify(db.prepare('SELECT status,processed,total,lease_until,error_code FROM menu_sync_jobs LIMIT 1').get()));db.close();",
+      ).trim(),
+    );
+  }
+  assert(
+    recovered,
+    'Interrupted background sync was not recovered after container restart (HTTP ' +
+      lastHttp +
+      ', state ' +
+      lastState?.status +
+      ')',
+  );
   console.log(
-    'Container smoke passed: read-only/non-root startup, migrations, health, HTTPS/CSRF, local bootstrap, MFA, secure cookies, account separation and key permissions.',
+    'Container smoke passed: read-only/non-root startup, migrations, health, HTTPS/CSRF, local bootstrap, MFA, secure cookies, account separation, key permissions and persistent sync recovery after container restart.',
   );
 } finally {
   if (started) docker('rm', '-f', name);

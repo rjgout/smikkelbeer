@@ -32,6 +32,10 @@ const db = new DatabaseSync(resolve(dest, 'smikkelbeer.sqlite'));
 db.exec(
   "DELETE FROM sessions; DELETE FROM tokens; DELETE FROM bootstrap; UPDATE outbox SET status='unknown',error='Hersteld uit back-up; controleer mailbox' WHERE status IN ('pending','sending'); UPDATE rounds SET status='unknown',issue='Hersteld uit back-up; controleer mailbox' WHERE status IN ('planned','open','closed','blocked','queued','sending');",
 );
+if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='menu_sync_jobs'").get())
+  db.prepare(
+    "UPDATE menu_sync_jobs SET status='interrupted',finished=?,updated=?,lease_owner=NULL,lease_until=NULL,error_code='BACKUP_RESTORED',error_message='Hersteld uit back-up; controleer de vorige taak en start zo nodig handmatig opnieuw.' WHERE status IN ('queued','running')",
+  ).run(Date.now(), Date.now());
 db.close();
 console.log(
   'Hersteld. Sessies en links zijn ingetrokken. Controleer onzekere verzendingen voor hervatten.',

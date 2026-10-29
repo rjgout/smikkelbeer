@@ -56,3 +56,5 @@ Bezoek daarna `/setup` via HTTPS. Een nieuw datavolume genereert automatisch een
 - [Beheer, rollen, mail, bron en statussen](docs/OPERATIONS.md)
 - [Back-up en herstel](docs/BACKUP_RESTORE.md)
 - [Oorspronkelijke opdracht](docs/MASTERPROMPT.md)
+
+Menukaartsynchronisatie loopt als persistente achtergrondtaak: de start-API antwoordt direct 202 en de beheerpagina toont voortgang via korte statusrequests. Dit voorkomt dat honderden optievensters binnen één Cloudflare-request moeten passen. Ook rondevoorbereiding gebruikt deze taak. Zie [Cloudflare-diagnose en synchronisatiebeheer](docs/MENU_SYNC.md).

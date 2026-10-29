@@ -37,3 +37,5 @@ docker run --rm --user 1000:1000 \
 De automatische integratietest maakt een live SQLite-back-up, herstelt naar een nieuwe map, vergelijkt de sleutel, controleert data en ingetrokken tokens en verifieert dat herstel naar een niet-lege map wordt geweigerd. Dit vervangt geen hersteloefening op de eigen NAS met de echte provider.
 
 Ook herstelde geplande, open, gesloten en geblokkeerde rondes krijgen status onbekend. Een back-up kan immers dateren van vóór een daadwerkelijke verzending. Controleer de mailbox en sluit de ronde handmatig af voordat je zo nodig een nieuwe ronde met nieuwe deelnemersbevestigingen start. Geen herstelde open ronde mag automatisch alsnog bestellen.
+
+Vanaf migratie 004 worden ook nog niet gestarte en draaiende menukaarttaken bij herstel expliciet onderbroken. Er worden geen oude bronrequests of afhankelijke ronde-opdrachten automatisch hervat. Teller/totaal en reeds volledig gepubliceerde catalogi blijven bewaard. Een back-up van vóór de nieuwe jobtabel kan eveneens met het herstelprogramma worden teruggezet.

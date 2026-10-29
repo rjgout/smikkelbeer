@@ -1,7 +1,18 @@
 import { load } from 'cheerio';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { all, one, run, audit } from './db';
+import { all, one, run, audit, transaction } from './db';
+import { setTimeout as sleep } from 'node:timers/promises';
+import {
+  MenuSyncError,
+  enqueueMenuSync,
+  assertMenuLease,
+  finishMenuFailure,
+  recoverMenuSyncJobs,
+  claimMenuSyncJob,
+  renewMenuLease,
+  menuSyncStatus,
+} from './menu-jobs';
 import { hash } from './crypto';
 import { settings } from './config';
 export type Option = {
@@ -143,19 +154,25 @@ export function parseOptions(html: string, productId: string): Option[] {
   return options.sort((a, b) => a.id.localeCompare(b.id));
 }
 const source = 'https://www.hetcentrummarum.nl';
-async function fetchSource(path: string) {
+async function fetchSource(path: string, signal: AbortSignal) {
   if (path !== '/' && !/^\/order\/product\/add\/\d+$/.test(path))
     throw new Error('Bronpad niet toegestaan');
   const response = await fetch(source + path, {
     redirect: 'error',
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
     headers: {
       'User-Agent': 'Smikkelbeer/0.1 (low-frequency menu synchronization)',
       Accept: 'text/html',
     },
   });
   if (!response.ok || !response.headers.get('content-type')?.includes('text/html'))
-    throw new Error('Bron niet beschikbaar');
+    throw new MenuSyncError(
+      'SOURCE_HTTP',
+      'De cafetaria geeft geen bruikbaar HTML-antwoord (HTTP ' +
+        response.status +
+        '). Er is niets gepubliceerd.',
+      502,
+    );
   const reader = response.body?.getReader();
   if (!reader) throw new Error('Lege bron');
   const chunks: Uint8Array[] = [];
@@ -172,46 +189,262 @@ async function fetchSource(path: string) {
   }
   return Buffer.concat(chunks).toString('utf8');
 }
-let syncing = false;
 export function digest(products: Product[]) {
   return hash(JSON.stringify(products));
 }
-export async function syncMenu(actor = 'system') {
-  if (syncing) throw new Error('Synchronisatie loopt al');
-  const s = settings();
-  if (!s.scrapingApproved)
-    throw new Error('Beoordeel bronvoorwaarden en activeer synchronisatie in Instellingen');
-  const recent = one('SELECT at FROM syncs ORDER BY at DESC LIMIT 1');
-  if (recent && Date.now() - recent.at < 60000)
-    throw new Error('Wacht minimaal één minuut tussen synchronisaties');
-  syncing = true;
-  const id = randomUUID();
+export type MenuSource = {
+  read: (path: string, signal: AbortSignal) => Promise<string>;
+  delay: (ms: number, signal: AbortSignal) => Promise<unknown>;
+};
+const defaultSource: MenuSource = {
+  read: fetchSource,
+  delay: (ms, signal) => sleep(ms, undefined, { signal }),
+};
+let processingMenu = false;
+let activeMenu: { id: string; owner: string; controller: AbortController } | undefined;
+let menuTimer: ReturnType<typeof setInterval> | undefined;
+let menuStopping = false;
+function safeSyncFailure(error: unknown, signal: AbortSignal) {
+  if (error instanceof MenuSyncError) return error;
+  if (signal.aborted)
+    return new MenuSyncError(
+      'PROCESS_INTERRUPTED',
+      'De synchronisatie is onderbroken. De vorige geldige momentopnamen zijn bewaard.',
+    );
+  if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name))
+    return new MenuSyncError(
+      'SOURCE_TIMEOUT',
+      'De cafetaria reageerde niet binnen de toegestane tijd. Er is geen onvolledige menukaart gepubliceerd.',
+      502,
+    );
+  return new MenuSyncError(
+    'SOURCE_UNAVAILABLE',
+    'De bron kon niet veilig worden gecontroleerd. Controleer de verbinding en bronstructuur; de vorige momentopnamen zijn bewaard.',
+    502,
+  );
+}
+function parseSource<T>(fn: () => T): T {
   try {
-    const products = parseMenu(await fetchSource('/'));
-    for (const p of products) {
-      if (!p.available) continue;
-      await new Promise((r) => setTimeout(r, s.syncIntervalMs));
-      p.options = parseOptions(await fetchSource('/order/product/add/' + p.id), p.id);
+    return fn();
+  } catch {
+    throw new MenuSyncError(
+      'SOURCE_STRUCTURE',
+      'De product- of optiestructuur van de cafetaria is gewijzigd of ongeldig. Er is niets gepubliceerd.',
+      502,
+    );
+  }
+}
+export async function processMenuSyncJobs(source: MenuSource = defaultSource) {
+  if (processingMenu || menuStopping) return;
+  recoverMenuSyncJobs();
+  const job = claimMenuSyncJob();
+  if (!job) return;
+  processingMenu = true;
+  const controller = new AbortController(),
+    owner = job.lease_owner;
+  activeMenu = { id: job.id, owner, controller };
+  const heartbeat = setInterval(() => {
+    try {
+      if (!renewMenuLease(job.id, owner)) controller.abort();
+    } catch {
+      controller.abort();
     }
+  }, 10000);
+  heartbeat.unref();
+  try {
+    const check = () => {
+      controller.signal.throwIfAborted();
+      assertMenuLease(job.id, owner);
+      if (!settings().scrapingApproved)
+        throw new MenuSyncError(
+          'SCRAPING_DISABLED',
+          'Synchronisatie gestopt: brongebruik is uitgeschakeld in Instellingen.',
+        );
+    };
+    check();
+    const html = await source.read('/', controller.signal);
+    check();
+    const catalog = parseSource(() => parseMenu(html));
     run(
-      'INSERT INTO syncs VALUES (?,?,1,?,?,NULL)',
-      id,
+      "UPDATE menu_sync_jobs SET total=?,phase='options',updated=? WHERE id=? AND lease_owner=?",
+      catalog.length,
       Date.now(),
-      digest(products),
-      JSON.stringify(products),
+      job.id,
+      owner,
     );
-    audit(actor, 'menu.sync', id, { count: products.length });
-    return { products, digest: digest(products) };
-  } catch (e) {
-    run(
-      'INSERT INTO syncs VALUES (?,?,0,NULL,NULL,?)',
-      id,
-      Date.now(),
-      e instanceof Error ? e.message : 'Bronfout',
+    for (const product of catalog) {
+      check();
+      run(
+        'UPDATE menu_sync_jobs SET current_product_id=? WHERE id=? AND lease_owner=?',
+        product.id,
+        job.id,
+        owner,
+      );
+      if (product.available) {
+        await source.delay(Math.max(job.delay_ms, settings().syncIntervalMs), controller.signal);
+        check();
+        const html = await source.read('/order/product/add/' + product.id, controller.signal);
+        check();
+        product.options = parseSource(() => parseOptions(html, product.id));
+      }
+      check();
+      run(
+        'UPDATE menu_sync_jobs SET processed=processed+1,updated=? WHERE id=? AND lease_owner=?',
+        Date.now(),
+        job.id,
+        owner,
+      );
+    }
+    const fingerprint = digest(catalog),
+      syncId = randomUUID();
+    transaction(() => {
+      check();
+      const progress = one('SELECT processed,total FROM menu_sync_jobs WHERE id=?', job.id);
+      if (progress.processed !== catalog.length || progress.total !== catalog.length)
+        throw new MenuSyncError(
+          'INCOMPLETE',
+          'De broncontrole is onvolledig. Er is niets gepubliceerd.',
+        );
+      run(
+        'INSERT INTO syncs VALUES (?,?,1,?,?,NULL)',
+        syncId,
+        Date.now(),
+        fingerprint,
+        JSON.stringify(catalog),
+      );
+      run(
+        "UPDATE menu_sync_jobs SET sync_id=?,phase='applying',updated=? WHERE id=? AND lease_owner=?",
+        syncId,
+        Date.now(),
+        job.id,
+        owner,
+      );
+    });
+    // Dependent HTTP actions run after publication, independently of the browser connection.
+    let roundId: string | null = null;
+    if (job.purpose !== 'menu') {
+      check();
+      const admin = one(
+        'SELECT r.permissions FROM admins a JOIN roles r ON r.id=a.role_id WHERE a.id=? AND a.active=1',
+        job.actor,
+      );
+      if (!admin || !JSON.parse(admin.permissions).some((p: string) => p === '*' || p === 'rounds'))
+        throw new MenuSyncError(
+          'PERMISSION_REVOKED',
+          'De menukaart is gecontroleerd, maar de beheerrechten voor de ronde zijn ingetrokken.',
+        );
+      if ((job.test === 1) !== settings().testMode)
+        throw new MenuSyncError(
+          'MODE_CHANGED',
+          'De menukaart is gecontroleerd, maar de testmodus is gewijzigd. Start de ronde-opdracht opnieuw.',
+        );
+      const payload = JSON.parse(job.payload);
+      const orders = await import('./orders');
+      check();
+      transaction(() => {
+        check();
+        if (job.purpose === 'round.create')
+          roundId = orders.createRoundFromMenu(payload, job.actor, {
+            products: catalog,
+            digest: fingerprint,
+          });
+        else {
+          roundId = payload.roundId;
+          orders.queueValidatedRound(roundId!, fingerprint);
+        }
+        run(
+          'UPDATE menu_sync_jobs SET result_round_id=? WHERE id=? AND lease_owner=?',
+          roundId,
+          job.id,
+          owner,
+        );
+      });
+    }
+    transaction(() => {
+      check();
+      run(
+        "UPDATE menu_sync_jobs SET status='succeeded',phase='complete',finished=?,updated=?,lease_owner=NULL,lease_until=NULL,current_product_id=NULL,result_round_id=? WHERE id=? AND lease_owner=?",
+        Date.now(),
+        Date.now(),
+        roundId,
+        job.id,
+        owner,
+      );
+      audit(job.actor, 'menu.sync', job.id, { count: catalog.length, purpose: job.purpose });
+    });
+  } catch (error) {
+    const published = one('SELECT sync_id,purpose FROM menu_sync_jobs WHERE id=?', job.id);
+    const failure =
+      published?.sync_id &&
+      published.purpose !== 'menu' &&
+      !(error instanceof MenuSyncError) &&
+      !controller.signal.aborted
+        ? new MenuSyncError(
+            'ROUND_ACTION_FAILED',
+            'De menukaart is volledig gecontroleerd, maar de ronde kon niet worden verwerkt. Controleer de planning en rondestatus voordat je opnieuw begint.',
+          )
+        : safeSyncFailure(error, controller.signal);
+    finishMenuFailure(
+      job.id,
+      owner,
+      failure.code,
+      failure.message,
+      ['PROCESS_INTERRUPTED', 'LEASE_LOST'].includes(failure.code),
     );
-    throw e;
   } finally {
-    syncing = false;
+    clearInterval(heartbeat);
+    activeMenu = undefined;
+    processingMenu = false;
+  }
+}
+export function stopMenuSyncWorker() {
+  menuStopping = true;
+  if (menuTimer) clearInterval(menuTimer);
+  menuTimer = undefined;
+  activeMenu?.controller.abort();
+}
+export function startMenuSyncWorker() {
+  if (menuTimer || menuStopping || process.env.BUILDING === '1') return;
+  menuTimer = setInterval(
+    () =>
+      void processMenuSyncJobs().catch(() => {
+        try {
+          audit('system', 'menu.worker_error');
+        } catch {
+          /* The healthcheck reports database failures; preserve the lease for recovery. */
+        }
+      }),
+    1000,
+  );
+  menuTimer.unref();
+  process.once('SIGTERM', stopMenuSyncWorker);
+  process.once('SIGINT', stopMenuSyncWorker);
+}
+export async function syncMenu(actor = 'system') {
+  if (menuStopping)
+    throw new MenuSyncError(
+      'PROCESS_INTERRUPTED',
+      'De server wordt gestopt. Start de synchronisatie opnieuw zodra de server beschikbaar is.',
+    );
+  const { job } = enqueueMenuSync(actor, 'menu', null, false);
+  startMenuSyncWorker();
+  for (;;) {
+    const current = menuSyncStatus(job.id).job!;
+    if (current.status === 'succeeded') {
+      const row = one('SELECT * FROM syncs WHERE id=? AND success=1', current.syncId);
+      if (!row)
+        throw new MenuSyncError(
+          'RESULT_MISSING',
+          'De gecontroleerde menukaart is niet meer beschikbaar. Synchroniseer opnieuw.',
+        );
+      return { products: JSON.parse(row.products) as Product[], digest: row.digest };
+    }
+    if (['failed', 'interrupted'].includes(current.status))
+      throw new MenuSyncError(
+        current.error?.code || 'SYNC_FAILED',
+        current.error?.message || 'Synchronisatie mislukt.',
+      );
+    await sleep(250);
   }
 }
 export function latestMenu() {
