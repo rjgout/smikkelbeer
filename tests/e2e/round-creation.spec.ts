@@ -178,6 +178,8 @@ test('tracks stale-menu creation beyond the proxy window and reload, rejecting r
   await page.getByRole('button', { name: 'Status opnieuw ophalen' }).click();
   await expect(page.getByRole('button', { name: 'Ronde aanmaken', exact: true })).toBeEnabled();
   expect(starts).toBe(1);
+  // The completion refresh may still be reading the mocked admin response.
+  await page.unrouteAll({ behavior: 'wait' });
 });
 test('shows Dutch validation errors and cannot create from an invalid or ambiguous date', async ({
   page,
