@@ -1,4 +1,4 @@
-import { readFileSync, copyFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
+import { constants, readFileSync, copyFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -25,7 +25,7 @@ if (readFileSync(resolve(source, 'master.key')).length !== 32)
   throw new Error('Sleutel beschadigd');
 mkdirSync(dest, { recursive: true, mode: 0o700 });
 for (const name of ['smikkelbeer.sqlite', 'master.key']) {
-  copyFileSync(resolve(source, name), resolve(dest, name));
+  copyFileSync(resolve(source, name), resolve(dest, name), constants.COPYFILE_EXCL);
   chmodSync(resolve(dest, name), 0o600);
 }
 const db = new DatabaseSync(resolve(dest, 'smikkelbeer.sqlite'));

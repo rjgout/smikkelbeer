@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -896,4 +896,71 @@ it('still warns when an untrusted incoming reply leaves a round awaiting review'
   run('UPDATE rounds SET sent=? WHERE id=?', Date.now() - 20 * 60000, r);
   await tick();
   expect(all("SELECT * FROM outbox WHERE round_id=? AND kind='alert'", r)).toHaveLength(1);
+});
+
+describe('descriptor-based master key initialization and code security gate', () => {
+  it('creates a private key atomically, retains it and rejects replacement after data exists', async () => {
+    const { loadMasterKey } = await import('../src/lib/server/keys');
+    const root = mkdtempSync(resolve(tmpdir(), 'smikkel-keys-'));
+    const path = resolve(root, 'master.key');
+    try {
+      const key = loadMasterKey(path, () => false);
+      expect(key).toHaveLength(32);
+      expect(loadMasterKey(path, () => true)).toEqual(key);
+      rmSync(path);
+      expect(() => loadMasterKey(path, () => true)).toThrow('restore');
+      expect(() => readFileSync(path)).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('rejects symlinks and malformed existing key files without replacing them', async () => {
+    const { loadMasterKey } = await import('../src/lib/server/keys');
+    const root = mkdtempSync(resolve(tmpdir(), 'smikkel-keys-'));
+    const target = resolve(root, 'target'),
+      path = resolve(root, 'master.key');
+    try {
+      writeFileSync(target, 'do not overwrite');
+      symlinkSync(target, path);
+      expect(() => loadMasterKey(path, () => false)).toThrow();
+      expect(readFileSync(target, 'utf8')).toBe('do not overwrite');
+      rmSync(path);
+      writeFileSync(path, 'invalid');
+      expect(() => loadMasterKey(path, () => false)).toThrow('Invalid');
+      expect(readFileSync(path, 'utf8')).toBe('invalid');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('blocks high severity SARIF findings and requires actual scan output', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'smikkel-sarif-'));
+    try {
+      expect(() =>
+        execFileSync(process.execPath, ['scripts/check-sarif.mjs', root], { stdio: 'pipe' }),
+      ).toThrow();
+      const document = {
+        runs: [
+          {
+            tool: {
+              driver: {
+                rules: [{ id: 'test/security', properties: { 'security-severity': '7.5' } }],
+              },
+            },
+            results: [{ ruleId: 'test/security', level: 'warning' }],
+          },
+        ],
+      };
+      writeFileSync(resolve(root, 'test.sarif'), JSON.stringify(document));
+      expect(() =>
+        execFileSync(process.execPath, ['scripts/check-sarif.mjs', root], { stdio: 'pipe' }),
+      ).toThrow();
+      document.runs[0].results = [];
+      writeFileSync(resolve(root, 'test.sarif'), JSON.stringify(document));
+      expect(
+        execFileSync(process.execPath, ['scripts/check-sarif.mjs', root], { encoding: 'utf8' }),
+      ).toContain('passed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

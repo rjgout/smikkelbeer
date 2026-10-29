@@ -6,23 +6,13 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
-import { readFileSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { one, dataDir } from './db';
-const keyPath = resolve(dataDir, 'master.key');
-if (
-  !existsSync(keyPath) &&
-  (one('SELECT id FROM settings LIMIT 1') || one('SELECT id FROM admins LIMIT 1'))
-)
-  throw new Error('Master key missing; restore the key from backup');
-try {
-  writeFileSync(keyPath, randomBytes(32), { flag: 'wx', mode: 0o600 });
-} catch (e) {
-  if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-}
-chmodSync(keyPath, 0o600);
-const key = readFileSync(keyPath);
-if (key.length !== 32) throw new Error('Invalid master key');
+import { loadMasterKey } from './keys';
+const key = loadMasterKey(
+  resolve(dataDir, 'master.key'),
+  () => !!(one('SELECT id FROM settings LIMIT 1') || one('SELECT id FROM admins LIMIT 1')),
+);
 export const randomToken = () => randomBytes(32).toString('base64url');
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function encrypt(value: string) {

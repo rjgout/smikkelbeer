@@ -23,7 +23,7 @@ Zie de PR voor daadwerkelijk uitgevoerde resultaten. Tests gelden uitsluitend al
 
 ## Uitgevoerd tijdens implementatie (29 oktober 2026)
 
-- 49 unit-/integratietests geslaagd; de live bronproef wordt in de standaardrun bewust overgeslagen.
+- 52 unit-/integratietests geslaagd; de live bronproef wordt in de standaardrun bewust overgeslagen.
 - 21 Playwright-tests geslaagd: desktop Chromium, Android-weergave en iPhone/WebKit.
 - Expliciete live bronproef geslaagd: `SMIKKEL_LIVE_SOURCE=1 npx vitest run tests/live-source.test.ts`. Actuele bron: 213 producten, 211 beschikbaar; alle beschikbare optievensters verwerkt. Geen bestellingen geplaatst op de cafetariawebsite.
 - TypeScript/Svelte: nul fouten/waarschuwingen. ESLint geslaagd.
@@ -31,3 +31,5 @@ Zie de PR voor daadwerkelijk uitgevoerde resultaten. Tests gelden uitsluitend al
 - CodeQL en de high/critical-containerscan zijn geslaagd. Open low-severity builddependency-meldingen blijven beschreven in SECURITY.md.
 
 De laatste commit wordt opnieuw in GitHub Actions gecontroleerd vóór image-publicatie. Definitieve run- en imageverwijzingen staan in de PR; een lokale eerdere test is geen bewijs voor een latere gewijzigde commit.
+
+Aanvullende regressies controleren atomische sleutelinitialisatie, behoud van bestaande sleutels, weigeren van symlinks/corrupte bestanden en de publicatiepoort bij een hoge CodeQL-SARIF-bevinding of ontbrekend scanresultaat.
