@@ -16,7 +16,7 @@ Persoonlijke bevestigingsmails staan standaard aan. Uitnodigingen bevatten een f
 
 De officiële HTML bevat `.dish` met stabiele numerieke product-ID's, bedragen, categorieën en uitverkochte knoppen. Productopties worden via `/order/product/add/<id>` gelezen. De adapter accepteert bekende checkbox/radio-opties met optielimieten. Verplichte SiteDish-keuzelijsten vereisen expliciet precies één bronoptie; onbekende selecties of structuurwijzigingen blokkeren. Geen handmatig assortiment of prijzen.
 
-De volledige broncontractdekking is nog niet live gecertificeerd. Robots.txt gaf tijdens onderzoek 404; dat is geen toestemming voor geautomatiseerd gebruik. Voorwaarden/toestemming moeten door de beheerder worden beoordeeld vóór activering. Houd de frequentie laag; geen anti-bot-, login- of CAPTCHA-omzeiling. Bij bronwijziging: fixtures/adapter bijwerken, testen en herbeoordelen.
+De technische live broncontracttest is op 29 oktober 2026 geslaagd voor alle 213 producten en 211 beschikbare optievensters; dit is geen certificering van toestemming of handmatige inhoudsacceptatie. Robots.txt gaf tijdens onderzoek 404; dat is geen toestemming voor geautomatiseerd gebruik. Voorwaarden/toestemming moeten door de beheerder worden beoordeeld vóór activering. Houd de frequentie laag; geen anti-bot-, login- of CAPTCHA-omzeiling. Bij bronwijziging: fixtures/adapter bijwerken, testen en herbeoordelen.
 
 ## Statusmachine
 
@@ -39,3 +39,7 @@ Afwezigheid heeft een inclusieve einddatum; deelname hervat automatisch. Pauzere
 Broncontrole-herpogingen gebruiken een aparte persistente tijdbegrenzing. Dit verhindert niet dat een geblokkeerde ronde één waarschuwing aan de coördinator oplevert; waarschuwingen blijven apart van de herpogingstimer geregistreerd.
 
 De automatische planning synchroniseert standaard 30 minuten vóór de uitnodigingstijd. Deze marge is via Instellingen instelbaar (10–120 minuten). Ook een ronde kort na middernacht kan de voorafgaande avond worden voorbereid. Uitnodigingen starten pas op het ingestelde tijdstip.
+
+Meervoudige identieke verplichte sauskeuzes in bronpakketten blijven afzonderlijke keuzes, ook met dezelfde bronoptie-IDs. Voorbereidingstijd wordt na de broncontrole én direct vóór SMTP opnieuw gecontroleerd. Een bestaand bestelmailrecord wordt nooit automatisch opnieuw klaargezet. Testidentiteit blijft per uitgaand bericht bewaard bij latere modus- of ontvangerwijzigingen.
+
+Een onbeoordeelde inkomende reactie onderdrukt de waarschuwing bij ontbrekende ontvangstbevestiging niet. Alleen daadwerkelijk bevestigde of afgehandelde rondes verlaten deze controle.

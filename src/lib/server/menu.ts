@@ -67,6 +67,7 @@ export function parseOptions(html: string, productId: string): Option[] {
   const selects = $('#addProductForm select.vreterijSelectOptie');
   if ($('#addProductForm select').length !== selects.length)
     throw new Error('Onbekende verplichte variant; bronadapter bijwerken');
+  const occurrences = new Map<string, number>();
   selects.each((_, el) => {
     const select = $(el);
     if (
@@ -82,9 +83,13 @@ export function parseOptions(html: string, productId: string): Option[] {
       .toArray()
       .map((o) => $(o).attr('data-id') || '')
       .sort();
-    const group = 'required-' + hash(sourceIds.join(':')).slice(0, 16);
-    const groupLabel =
+    const signature = 'required-' + hash(sourceIds.join(':')).slice(0, 16);
+    const occurrence = occurrences.get(signature) || 0;
+    occurrences.set(signature, occurrence + 1);
+    const group = signature + (occurrence ? '-' + (occurrence + 1) : '');
+    const sourceLabel =
       select.parent().prev('.form-group-label').find('label').text().trim() || 'Kies een variant';
+    const groupLabel = sourceLabel + (occurrence ? ' (' + (occurrence + 1) + ')' : '');
     sourceOptions.each((_, option) => {
       const o = $(option),
         id = o.attr('data-id'),

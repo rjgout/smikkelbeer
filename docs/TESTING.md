@@ -20,3 +20,14 @@ Fixtures zijn gereduceerde publieke bronvoorbeelden van 29 oktober 2026, uitslui
 Zie de PR voor daadwerkelijk uitgevoerde resultaten. Tests gelden uitsluitend als geslaagd nadat ze zijn uitgevoerd.
 
 `npm run test:container` controleert het echte image: niet-root/read-only-start, migraties, healthcheck, weigeren van ontbrekende HTTPS-proxyheaders en CSRF, lokale bootstrap, TOTP, Secure/HttpOnly/SameSite-cookies, accountscheiding en bestandsrechten. Het gebruikt een afzonderlijk tijdelijk volume en geen externe mailprovider.
+
+## Uitgevoerd tijdens implementatie (29 oktober 2026)
+
+- 49 unit-/integratietests geslaagd; de live bronproef wordt in de standaardrun bewust overgeslagen.
+- 21 Playwright-tests geslaagd: desktop Chromium, Android-weergave en iPhone/WebKit.
+- Expliciete live bronproef geslaagd: `SMIKKEL_LIVE_SOURCE=1 npx vitest run tests/live-source.test.ts`. Actuele bron: 213 producten, 211 beschikbaar; alle beschikbare optievensters verwerkt. Geen bestellingen geplaatst op de cafetariawebsite.
+- TypeScript/Svelte: nul fouten/waarschuwingen. ESLint geslaagd.
+- Distroless Docker-build en container-smoketest geslaagd, inclusief MFA/CSRF/HTTPS, niet-root en read-only.
+- CodeQL en de high/critical-containerscan zijn geslaagd. Open low-severity builddependency-meldingen blijven beschreven in SECURITY.md.
+
+De laatste commit wordt opnieuw in GitHub Actions gecontroleerd vóór image-publicatie. Definitieve run- en imageverwijzingen staan in de PR; een lokale eerdere test is geen bewijs voor een latere gewijzigde commit.

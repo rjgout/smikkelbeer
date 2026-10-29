@@ -122,7 +122,7 @@ afterAll(() => {
 });
 describe('migrations, encryption and configuration', () => {
   it('applies migrations and enforces foreign keys', () => {
-    expect(one('SELECT count(*) n FROM migrations').n).toBe(2);
+    expect(one('SELECT count(*) n FROM migrations').n).toBe(3);
     expect(() => run('INSERT INTO favorites VALUES (?,?)', 'missing', '85')).toThrow();
   });
   it('authenticated encryption rejects tampering and stores no plaintext config', () => {
@@ -572,6 +572,7 @@ describe('backup and restore', () => {
   it('restores database and key together and revokes sessions and queued sends', () => {
     const id = employee();
     issueToken(id);
+    round('open');
     const backupDir = resolve(directory, '..', 'backup-' + randomUUID());
     const restoreDir = resolve(directory, '..', 'restore-' + randomUUID());
     try {
@@ -584,6 +585,7 @@ describe('backup and restore', () => {
       const restored = new (db.constructor as any)(resolve(restoreDir, 'smikkelbeer.sqlite'));
       expect(restored.prepare('SELECT count(*) n FROM employees').get().n).toBe(1);
       expect(restored.prepare('SELECT count(*) n FROM tokens').get().n).toBe(0);
+      expect(restored.prepare('SELECT status FROM rounds').get().status).toBe('unknown');
       expect(readFileSync(resolve(restoreDir, 'master.key'))).toEqual(
         readFileSync(resolve(directory, 'master.key')),
       );
@@ -761,4 +763,137 @@ it('requires exactly one actual source variant and prices optional extras in cen
   expect(priceLines([{ ...input, optionIds: [choices[0].id, extra.id] }], [sundae])[0].total).toBe(
     970,
   );
+});
+
+it('sends one arrival-only correction after explicit confirmation and never resends the order', () => {
+  const r = round('sent');
+  const base = roundTimes({
+    day: '2099-10-29',
+    invite: '11:45',
+    close: '12:00',
+    send: '12:05',
+    arrival: '12:30',
+    paymentMode: 'individual',
+  });
+  run(
+    'UPDATE rounds SET day=?,opens=?,closes=?,sends=?,arrives=? WHERE id=?',
+    '2099-10-29',
+    base.opens,
+    base.closes,
+    base.sends,
+    base.arrives,
+    r,
+  );
+  const change = { close: '12:00', send: '12:05', arrival: '13:00', confirmCorrection: false };
+  expect(() => updateTimes(r, change, 'test')).toThrow();
+  updateTimes(r, { ...change, confirmCorrection: true }, 'test');
+  updateTimes(r, { ...change, confirmCorrection: true }, 'test');
+  const messages = all('SELECT kind,html FROM outbox WHERE round_id=?', r);
+  expect(messages).toHaveLength(1);
+  expect(messages[0].kind).toBe('correction');
+  expect(decrypt(messages[0].html)).toContain('Alleen correctie aankomsttijd');
+  expect(decrypt(messages[0].html)).not.toContain('Totaaloverzicht voor de keuken');
+});
+
+it('preserves repeated mandatory source groups as two independent sauce selections', () => {
+  const options = parseOptions(readFileSync('tests/fixtures/options-263.html', 'utf8'), '263');
+  const groups = [...new Set(options.map((o) => o.group))];
+  expect(groups).toHaveLength(2);
+  expect(new Set(options.map((o) => o.id)).size).toBe(options.length);
+  const p = {
+    id: '263',
+    name: 'luxe mini snacks 4 pers.',
+    category: 'Snacks' as const,
+    cents: 1650,
+    available: true,
+    options,
+  };
+  const first = options.find((o) => o.group === groups[0])!,
+    second = options.find((o) => o.group === groups[1])!;
+  expect(() =>
+    priceLines([{ productId: p.id, optionIds: [first.id], quantity: 1, note: '' }], [p]),
+  ).toThrow('verplichte');
+  const lines = priceLines(
+    [{ productId: p.id, optionIds: [first.id, second.id], quantity: 1, note: '' }],
+    [p],
+  );
+  expect(lines[0].optionIds).toHaveLength(2);
+});
+
+it('keeps queued test mail isolated after switching production settings', async () => {
+  const { settings } = await import('../src/lib/server/config');
+  enqueue({
+    dedupe: 'mode-switch',
+    to: 'test@example.invalid',
+    subject: '[TEST]',
+    html: 'test',
+    kind: 'test',
+  });
+  const s = settings();
+  saveSettings(
+    {
+      ...s,
+      testMode: false,
+      scrapingApproved: true,
+      testRecipients: [],
+      cafeteria: 'test@example.invalid',
+      coordinator: 'coordinator@example.invalid',
+    },
+    'test',
+  );
+  const sender = vi.fn(async () => {});
+  await processOutbox(sender);
+  expect(sender).not.toHaveBeenCalled();
+  expect(one('SELECT status,test FROM outbox')).toMatchObject({ status: 'failed', test: 1 });
+});
+it('blocks dispatch when source validation has used the remaining preparation time', () => {
+  const id = employee(),
+    r = round();
+  run('UPDATE employees SET preferences=? WHERE id=?', '{"confirmations":false}', id);
+  saveOrder(id, {
+    roundId: r,
+    revision: 0,
+    declined: false,
+    lines: [{ productId: '85', optionIds: [], quantity: 1, note: '' }],
+  });
+  run("UPDATE rounds SET status='closed',sends=0,arrives=? WHERE id=?", Date.now() + 60000, r);
+  queueValidatedRound(r, digest(products));
+  expect(one('SELECT status FROM rounds').status).toBe('blocked');
+  expect(all("SELECT * FROM outbox WHERE kind='order'")).toHaveLength(0);
+});
+it('rechecks preparation time immediately before SMTP and never requeues a blocked send', async () => {
+  const id = employee(),
+    r = round();
+  run('UPDATE employees SET preferences=? WHERE id=?', '{"confirmations":false}', id);
+  saveOrder(id, {
+    roundId: r,
+    revision: 0,
+    declined: false,
+    lines: [{ productId: '85', optionIds: [], quantity: 1, note: '' }],
+  });
+  run("UPDATE rounds SET status='closed',sends=0 WHERE id=?", r);
+  queueValidatedRound(r, digest(products));
+  run('UPDATE rounds SET arrives=? WHERE id=?', Date.now() + 60000, r);
+  const sender = vi.fn(async () => {});
+  await processOutbox(sender);
+  expect(sender).not.toHaveBeenCalled();
+  expect(one('SELECT status FROM rounds').status).toBe('blocked');
+  run('UPDATE rounds SET arrives=? WHERE id=?', Date.now() + 2400000, r);
+  queueValidatedRound(r, digest(products));
+  expect(one('SELECT status FROM rounds').status).toBe('blocked');
+  expect(all('SELECT * FROM outbox')).toHaveLength(1);
+});
+
+it('still warns when an untrusted incoming reply leaves a round awaiting review', async () => {
+  const { settings } = await import('../src/lib/server/config');
+  const { tick } = await import('../src/lib/server/scheduler');
+  const s = settings();
+  saveSettings(
+    { ...s, weekdays: [], coordinator: 'test@example.invalid', smtp: { ...s.smtp, host: '' } },
+    'test',
+  );
+  const r = round('review');
+  run('UPDATE rounds SET sent=? WHERE id=?', Date.now() - 20 * 60000, r);
+  await tick();
+  expect(all("SELECT * FROM outbox WHERE round_id=? AND kind='alert'", r)).toHaveLength(1);
 });

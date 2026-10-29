@@ -79,7 +79,7 @@ export function enqueue(input: {
     now = Date.now();
   const messageId = `<${id}@smikkelbeer.invalid>`;
   run(
-    'INSERT INTO outbox(id,dedupe,round_id,recipient,subject,html,message_id,kind,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(dedupe) DO NOTHING',
+    'INSERT INTO outbox(id,dedupe,round_id,recipient,subject,html,message_id,kind,created,updated,test) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(dedupe) DO NOTHING',
     id,
     input.dedupe,
     input.roundId || null,
@@ -90,6 +90,7 @@ export function enqueue(input: {
     input.kind,
     now,
     now,
+    isTest ? 1 : 0,
   );
   return one('SELECT id,message_id FROM outbox WHERE dedupe=?', input.dedupe);
 }
@@ -154,8 +155,28 @@ export async function processOutbox(sender: MailSender = smtpSend) {
     for (const msg of all(
       "SELECT * FROM outbox WHERE status='pending' ORDER BY created LIMIT 10",
     )) {
+      if (msg.kind === 'order') {
+        const round = one('SELECT status,arrives FROM rounds WHERE id=?', msg.round_id);
+        if (
+          !round ||
+          round.status !== 'queued' ||
+          round.arrives - Date.now() < s.minPreparation * 60000
+        ) {
+          run(
+            "UPDATE outbox SET status='failed',error='Bestelstatus of resterende voorbereidingstijd blokkeert aflevering',updated=? WHERE id=?",
+            Date.now(),
+            msg.id,
+          );
+          if (round?.status === 'queued')
+            run(
+              "UPDATE rounds SET status='blocked',issue='Voorbereidingstijd verstreken vóór SMTP. Maak na controle een nieuwe ronde.' WHERE id=?",
+              msg.round_id,
+            );
+          continue;
+        }
+      }
       if (
-        s.testMode &&
+        (s.testMode || msg.test === 1) &&
         (!s.testRecipients.map((x) => x.toLowerCase()).includes(msg.recipient.toLowerCase()) ||
           msg.recipient.toLowerCase() === s.cafeteria.toLowerCase())
       ) {

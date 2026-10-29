@@ -36,7 +36,16 @@ it.skipIf(process.env.SMIKKEL_LIVE_SOURCE !== '1')(
       for (const product of products) {
         if (!product.available) continue;
         await new Promise((r) => setTimeout(r, 1100));
-        product.options = parseOptions(read('/order/product/add/' + product.id), product.id);
+        try {
+          product.options = parseOptions(read('/order/product/add/' + product.id), product.id);
+        } catch (e) {
+          throw new Error(
+            'Official source product ' +
+              product.id +
+              ': ' +
+              (e instanceof Error ? e.message : 'invalid options'),
+          );
+        }
         checked++;
       }
       console.log(

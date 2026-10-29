@@ -2,7 +2,7 @@
 
 Responsive snackbestelwebsite voor Team Informatie & Automatisering, Gemeente Westerkwartier. Producten en prijzen komen uitsluitend van Cafetaria ’t Centrum in Marum.
 
-**Status: werkende eerste implementatie voor acceptatietesten, geen vrijgegeven productieapplicatie.** Externe mailproviders, volledige brondekking, gemeentelijke toestemming en deployment op de echte Synology zijn nog niet geverifieerd. Zie [open punten en acceptatiecriteria](docs/REQUIREMENTS.md).
+**Status: werkende eerste implementatie voor acceptatietesten, geen vrijgegeven productieapplicatie.** De technische broncontrole is geslaagd voor 213 producten en alle 211 beschikbare optievensters. Echte mailproviders, handmatige inhoudsacceptatie, gemeentelijke toestemming en uitrol op de echte Synology zijn nog niet geverifieerd. Zie [open punten en acceptatiecriteria](docs/REQUIREMENTS.md).
 
 ## Lokaal ontwikkelen
 

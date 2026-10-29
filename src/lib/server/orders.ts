@@ -159,6 +159,21 @@ export function queueValidatedRound(roundId: string, currentDigest: string) {
       return;
     }
     const s = settings();
+    if (r.arrives - Date.now() < s.minPreparation * 60000) {
+      run(
+        "UPDATE rounds SET status='blocked',issue='Onvoldoende resterende voorbereidingstijd na broncontrole. Niet verzonden.' WHERE id=?",
+        r.id,
+      );
+      audit('system', 'round.preparation_block', r.id);
+      return;
+    }
+    if (one("SELECT id FROM outbox WHERE round_id=? AND kind='order'", r.id)) {
+      run(
+        "UPDATE rounds SET status='blocked',issue='Bestaand verzendrecord vereist handmatige controle; geen nieuwe bestelmail aangemaakt.' WHERE id=?",
+        r.id,
+      );
+      return;
+    }
     if (!!r.test !== s.testMode) throw new Error('Testmodus gewijzigd; annuleer deze ronde');
     const recipients = r.test ? s.testRecipients.slice(0, 1) : [s.cafeteria];
     if (!recipients.length || !recipients[0]) throw new Error('Geen ontvanger ingesteld');

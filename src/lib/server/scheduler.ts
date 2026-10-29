@@ -106,9 +106,14 @@ export async function tick() {
       }
     }
     for (const r of all(
-      "SELECT * FROM rounds WHERE status IN ('sent','unknown','blocked','failed') AND alerted IS NULL",
+      "SELECT * FROM rounds WHERE status IN ('sent','review','unknown','blocked','failed') AND alerted IS NULL",
     )) {
-      if (r.status === 'sent' && now - r.sent < s.confirmationMinutes * 60000) continue;
+      if (
+        ['sent', 'review'].includes(r.status) &&
+        r.sent &&
+        now - r.sent < s.confirmationMinutes * 60000
+      )
+        continue;
       if (s.coordinator) {
         try {
           enqueue({

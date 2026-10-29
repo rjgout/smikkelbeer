@@ -30,7 +30,7 @@ for (const name of ['smikkelbeer.sqlite', 'master.key']) {
 }
 const db = new DatabaseSync(resolve(dest, 'smikkelbeer.sqlite'));
 db.exec(
-  "DELETE FROM sessions; DELETE FROM tokens; DELETE FROM bootstrap; UPDATE outbox SET status='unknown',error='Hersteld uit back-up; controleer mailbox' WHERE status IN ('pending','sending'); UPDATE rounds SET status='unknown',issue='Hersteld uit back-up; controleer mailbox' WHERE status IN ('queued','sending');",
+  "DELETE FROM sessions; DELETE FROM tokens; DELETE FROM bootstrap; UPDATE outbox SET status='unknown',error='Hersteld uit back-up; controleer mailbox' WHERE status IN ('pending','sending'); UPDATE rounds SET status='unknown',issue='Hersteld uit back-up; controleer mailbox' WHERE status IN ('planned','open','closed','blocked','queued','sending');",
 );
 db.close();
 console.log(
