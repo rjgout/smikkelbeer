@@ -4,7 +4,15 @@ import { randomUUID } from 'node:crypto';
 import { all, one, run, audit } from './db';
 import { hash } from './crypto';
 import { settings } from './config';
-export type Option = { id: string; name: string; cents: number; group: string; max: number };
+export type Option = {
+  id: string;
+  name: string;
+  cents: number;
+  group: string;
+  max: number;
+  min?: number;
+  groupLabel?: string;
+};
 export type Product = {
   id: string;
   name: string;
@@ -56,8 +64,47 @@ export function parseOptions(html: string, productId: string): Option[] {
   if (!$('#addProductForm').length) throw new Error('Optiestructuur gewijzigd');
   const options: Option[] = [];
   const inputs = $('#addProductForm input.vreterijOptie');
-  if ($('#addProductForm select').length)
-    throw new Error('Niet-ondersteunde verplichte variant; bronadapter bijwerken');
+  const selects = $('#addProductForm select.vreterijSelectOptie');
+  if ($('#addProductForm select').length !== selects.length)
+    throw new Error('Onbekende verplichte variant; bronadapter bijwerken');
+  selects.each((_, el) => {
+    const select = $(el);
+    if (
+      select.attr('data-productid') !== productId ||
+      select.attr('multiple') !== undefined ||
+      select.attr('disabled') !== undefined
+    )
+      throw new Error('Onbekende verplichte variant');
+    const sourceOptions = select.find('option.vreterijOptie');
+    if (!sourceOptions.length || sourceOptions.length !== select.find('option').length)
+      throw new Error('Verplichte varianten ontbreken');
+    const sourceIds = sourceOptions
+      .toArray()
+      .map((o) => $(o).attr('data-id') || '')
+      .sort();
+    const group = 'required-' + hash(sourceIds.join(':')).slice(0, 16);
+    const groupLabel =
+      select.parent().prev('.form-group-label').find('label').text().trim() || 'Kies een variant';
+    sourceOptions.each((_, option) => {
+      const o = $(option),
+        id = o.attr('data-id'),
+        name = o.attr('data-naam');
+      if (!id || !name || o.attr('disabled') !== undefined)
+        throw new Error('Onbekende verplichte optie');
+      options.push({
+        id: group + ':' + id,
+        name,
+        group,
+        groupLabel,
+        min: 1,
+        max: 1,
+        cents:
+          cents(o.attr('data-prijs')) +
+          cents(o.attr('data-deposit') || '0.00') +
+          cents(o.attr('data-supfee') || '0.00'),
+      });
+    });
+  });
   inputs.each((_, el) => {
     const p = $(el);
     const id = p.attr('data-id'),
@@ -197,9 +244,12 @@ export function priceLines(input: unknown, products: Product[]): OrderLine[] {
       if (!o) throw new Error('Onbekende optie');
       return o;
     });
-    for (const o of opts)
-      if (opts.filter((x) => x.group === o.group).length > o.max)
-        throw new Error('Te veel opties in groep');
+    for (const o of p.options) {
+      const count = opts.filter((x) => x.group === o.group).length;
+      if (count > o.max) throw new Error('Te veel opties in groep');
+      if (count < (o.min || 0))
+        throw new Error('Kies de verplichte variant: ' + (o.groupLabel || 'productoptie'));
+    }
     const unit = p.cents + opts.reduce((n, o) => n + o.cents, 0);
     const note = l.note.trim();
     const key = hash(JSON.stringify([p.id, ids, note]));

@@ -61,6 +61,7 @@ export const settingsSchema = z
     testMode: z.boolean(),
     testRecipients: z.array(z.email()).max(10),
     scrapingApproved: z.boolean(),
+    syncLeadMinutes: z.number().int().min(10).max(120).default(30),
     syncIntervalMs: z.number().int().min(1000).max(10000),
     templates: z.object({
       invitation: z.string().min(1).max(500),
@@ -106,6 +107,7 @@ export const defaults: Settings = {
   testMode: true,
   testRecipients: [],
   scrapingApproved: false,
+  syncLeadMinutes: 30,
   syncIntervalMs: 1000,
   templates: {
     invitation: 'Tijd voor iets lekkers! Bevestig je eenmalige link om te bestellen.',
@@ -114,7 +116,9 @@ export const defaults: Settings = {
 };
 export function settings(): Settings {
   const row = one('SELECT value FROM settings WHERE id=1');
-  return row ? JSON.parse(decrypt(row.value)) : structuredClone(defaults);
+  return row
+    ? { ...structuredClone(defaults), ...JSON.parse(decrypt(row.value)) }
+    : structuredClone(defaults);
 }
 export function publicSettings() {
   const s = settings();

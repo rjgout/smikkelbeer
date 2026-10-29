@@ -74,6 +74,30 @@
   function openDialog(node: HTMLDialogElement) {
     node.showModal();
   }
+  const requiredGroups = $derived(
+    selected
+      ? [
+          ...new Set<string>(
+            selected.options.filter((o: any) => (o.min || 0) > 0).map((o: any) => o.group),
+          ),
+        ].map((group) => ({
+          id: group,
+          label: selected.options.find((o: any) => o.group === group).groupLabel,
+          options: selected.options.filter((o: any) => o.group === group),
+        }))
+      : [],
+  );
+  const missingRequired = $derived(
+    requiredGroups.some(
+      (g) => !selectedOptions.some((id) => g.options.some((o: any) => o.id === id)),
+    ),
+  );
+  function selectRequired(group: string, id: string) {
+    selectedOptions = selectedOptions.filter(
+      (existing) => !selected.options.some((o: any) => o.id === existing && o.group === group),
+    );
+    if (id) selectedOptions.push(id);
+  }
   function choose(p: any) {
     selected = p;
     selectedOptions = [];
@@ -482,8 +506,18 @@
         >
       </div>
       <p>Basisprijs {money(selected.cents)}</p>
-      {#if selected.options.length}<h3>Sauzen & extra’s</h3>
-        {#each selected.options as o}<label class="option-label"
+      {#each requiredGroups as group}<label
+          >{group.label} (verplicht)<select
+            value={selectedOptions.find((id) => group.options.some((o: any) => o.id === id)) || ''}
+            onchange={(e) => selectRequired(group.id, e.currentTarget.value)}
+            required
+            ><option value="" disabled>Kies een variant</option>{#each group.options as o}<option
+                value={o.id}>{o.name}{o.cents ? ' · + ' + money(o.cents) : ''}</option
+              >{/each}</select
+          ></label
+        >{/each}
+      {#if selected.options.some((o: any) => !(o.min || 0))}<h3>Sauzen & extra’s</h3>
+        {#each selected.options.filter((o: any) => !(o.min || 0)) as o}<label class="option-label"
             ><input type="checkbox" value={o.id} bind:group={selectedOptions} /><span>{o.name}</span
             ><strong>+ {money(o.cents)}</strong></label
           >{/each}{/if}<label
@@ -494,7 +528,7 @@
         /></label
       ><label>Aantal<input type="number" min="1" max="30" bind:value={quantity} /></label><button
         class="primary full"
-        disabled={!quantity || quantity < 1 || quantity > 30}
+        disabled={!quantity || quantity < 1 || quantity > 30 || missingRequired}
         onclick={add}
         >Toevoegen · {money(
           (selected.cents +

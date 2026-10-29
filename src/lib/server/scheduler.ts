@@ -13,33 +13,40 @@ export async function tick() {
   try {
     const s = settings();
     const now = Date.now(),
-      local = DateTime.now().setZone(s.timezone),
-      day = local.toISODate()!;
-    if (
-      s.weekdays.includes(local.weekday) &&
-      !s.exceptions.includes(day) &&
-      local.toFormat('HH:mm') >= s.inviteTime &&
-      local.toFormat('HH:mm') < s.closeTime &&
-      !one('SELECT id FROM rounds WHERE day=? AND automatic=1', day)
-    ) {
-      try {
-        await createRound(
-          {
-            day,
-            invite: s.inviteTime,
-            close: s.closeTime,
-            send: s.sendTime,
-            arrival: s.arrivalTime,
-            paymentMode: s.paymentMode,
-          },
-          'scheduler',
-          true,
-          true,
-        );
-      } catch {
-        audit('system', 'schedule.blocked', day, {
-          message: 'Automatisch starten mislukt; controleer bron en instellingen',
-        });
+      local = DateTime.now().setZone(s.timezone);
+    // Prepare before invitations are due, including the next day's early rounds.
+    for (const candidate of [local, local.plus({ days: 1 })]) {
+      const day = candidate.toISODate()!;
+      const invitation = DateTime.fromISO(day + 'T' + s.inviteTime, {
+        zone: s.timezone,
+      }).toMillis();
+      const closing = DateTime.fromISO(day + 'T' + s.closeTime, { zone: s.timezone }).toMillis();
+      if (
+        s.weekdays.includes(candidate.weekday) &&
+        !s.exceptions.includes(day) &&
+        now >= invitation - (s.syncLeadMinutes ?? 30) * 60000 &&
+        now < closing &&
+        !one('SELECT id FROM rounds WHERE day=? AND automatic=1', day)
+      ) {
+        try {
+          await createRound(
+            {
+              day,
+              invite: s.inviteTime,
+              close: s.closeTime,
+              send: s.sendTime,
+              arrival: s.arrivalTime,
+              paymentMode: s.paymentMode,
+            },
+            'scheduler',
+            true,
+            true,
+          );
+        } catch {
+          audit('system', 'schedule.blocked', day, {
+            message: 'Automatisch voorbereiden mislukt; controleer bron en instellingen',
+          });
+        }
       }
     }
     for (const r of all(

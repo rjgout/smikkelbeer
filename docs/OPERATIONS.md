@@ -14,7 +14,7 @@ Persoonlijke bevestigingsmails staan standaard aan. Uitnodigingen bevatten een f
 
 ## Bron
 
-De officiële HTML bevat `.dish` met stabiele numerieke product-ID's, bedragen, categorieën en uitverkochte knoppen. Productopties worden via `/order/product/add/<id>` gelezen. De adapter accepteert bekende checkbox/radio-opties met optielimieten. Vereiste/nieuwe variantselecties of structuurwijzigingen blokkeren. Geen handmatig assortiment of prijzen.
+De officiële HTML bevat `.dish` met stabiele numerieke product-ID's, bedragen, categorieën en uitverkochte knoppen. Productopties worden via `/order/product/add/<id>` gelezen. De adapter accepteert bekende checkbox/radio-opties met optielimieten. Verplichte SiteDish-keuzelijsten vereisen expliciet precies één bronoptie; onbekende selecties of structuurwijzigingen blokkeren. Geen handmatig assortiment of prijzen.
 
 De volledige broncontractdekking is nog niet live gecertificeerd. Robots.txt gaf tijdens onderzoek 404; dat is geen toestemming voor geautomatiseerd gebruik. Voorwaarden/toestemming moeten door de beheerder worden beoordeeld vóór activering. Houd de frequentie laag; geen anti-bot-, login- of CAPTCHA-omzeiling. Bij bronwijziging: fixtures/adapter bijwerken, testen en herbeoordelen.
 
@@ -37,3 +37,5 @@ Iedereen betaalt bij de cafetaria of één persoon schiet voor. De aparte betali
 Afwezigheid heeft een inclusieve einddatum; deelname hervat automatisch. Pauzeren is vrijwillig en verhindert profieltoegang via een nieuw aangevraagde link niet. Deactiveren door beheer trekt alle sessies/links in en verhindert nieuwe toegang. Eén ronde overslaan onderdrukt uitnodigingen; expliciet geen snacks kiezen legt niet-deelname vast.
 
 Broncontrole-herpogingen gebruiken een aparte persistente tijdbegrenzing. Dit verhindert niet dat een geblokkeerde ronde één waarschuwing aan de coördinator oplevert; waarschuwingen blijven apart van de herpogingstimer geregistreerd.
+
+De automatische planning synchroniseert standaard 30 minuten vóór de uitnodigingstijd. Deze marge is via Instellingen instelbaar (10–120 minuten). Ook een ronde kort na middernacht kan de voorafgaande avond worden voorbereid. Uitnodigingen starten pas op het ingestelde tijdstip.

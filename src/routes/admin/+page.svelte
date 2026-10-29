@@ -978,6 +978,14 @@
             <section class="panel">
               <h2>Menukaartbron</h2>
               <p>Vaste bron: https://www.hetcentrummarum.nl. Geen instelbare scraper-URL.</p>
+              <label
+                >Broncontrole vóór uitnodigingen (minuten)<input
+                  type="number"
+                  min="10"
+                  max="120"
+                  bind:value={data.settings.syncLeadMinutes}
+                /></label
+              >
               <label class="check"
                 ><input type="checkbox" bind:checked={data.settings.scrapingApproved} /> Ik heb de voorwaarden
                 en toestemming voor dit gebruik beoordeeld.</label

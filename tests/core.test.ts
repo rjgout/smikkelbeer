@@ -715,3 +715,50 @@ it('alerts the coordinator exactly once when final source validation blocks a ro
   expect(one('SELECT status FROM rounds WHERE id=?', r).status).toBe('blocked');
   expect(all("SELECT * FROM outbox WHERE kind='alert' AND round_id=?", r)).toHaveLength(1);
 });
+
+it('prepares an automatic snapshot before the configured invitation time', async () => {
+  const menu = await import('../src/lib/server/menu');
+  const { tick } = await import('../src/lib/server/scheduler');
+  const { settings } = await import('../src/lib/server/config');
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-30T10:20:00Z'));
+  const s = settings();
+  saveSettings({ ...s, weekdays: [1, 2, 3, 4, 5, 6, 7], smtp: { ...s.smtp, host: '' } }, 'test');
+  const sync = vi.spyOn(menu, 'syncMenu').mockResolvedValue({ products, digest: digest(products) });
+  try {
+    await tick();
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(one('SELECT status,automatic FROM rounds')).toMatchObject({
+      status: 'planned',
+      automatic: 1,
+    });
+    expect(all('SELECT * FROM outbox')).toHaveLength(0);
+  } finally {
+    sync.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it('requires exactly one actual source variant and prices optional extras in cents', () => {
+  const options = parseOptions(readFileSync('tests/fixtures/options-237.html', 'utf8'), '237');
+  const sundae = {
+    id: '237',
+    name: 'Sundae Normaal',
+    category: 'Overige' as const,
+    cents: 425,
+    available: true,
+    options,
+  };
+  const input = { productId: '237', optionIds: [], quantity: 2, note: '' };
+  expect(() => priceLines([input], [sundae])).toThrow('verplichte');
+  const choices = options.filter((o) => o.min === 1),
+    extra = options.find((o) => !o.min)!;
+  expect(choices).toHaveLength(8);
+  expect(choices[0].cents).toBe(0);
+  expect(() =>
+    priceLines([{ ...input, optionIds: choices.slice(0, 2).map((o) => o.id) }], [sundae]),
+  ).toThrow('Te veel');
+  expect(priceLines([{ ...input, optionIds: [choices[0].id, extra.id] }], [sundae])[0].total).toBe(
+    970,
+  );
+});

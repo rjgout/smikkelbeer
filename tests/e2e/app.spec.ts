@@ -47,6 +47,7 @@ function seed() {
         options: [],
       });
     });
+    products.push(JSON.parse(readFileSync('tests/fixtures/sundae.json', 'utf8')));
     const snapshot = JSON.stringify(products);
     round = { id: randomUUID() };
     db.prepare(
@@ -224,4 +225,22 @@ test('payment role cannot access employee accounts or system settings', async ({
   expect(employee.status()).toBe(401);
   await page.getByRole('button', { name: 'Betalingen', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Terugbetalingen' })).toBeVisible();
+});
+
+test('source-required variants must be explicitly chosen before adding to the basket', async ({
+  page,
+}) => {
+  const s = seed();
+  await employeeLogin(page, s.token);
+  await page.getByRole('tab', { name: /Overige/ }).click();
+  await page.getByRole('button', { name: 'Sundae Normaal toevoegen', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: /Toevoegen/ })).toBeDisabled();
+  await dialog
+    .getByRole('combobox', { name: 'Sundaes (verplicht)' })
+    .selectOption({ label: 'Aardbei' });
+  await dialog.getByRole('button', { name: /Toevoegen/ }).click();
+  await page.getByRole('button', { name: 'Bestelling bevestigen' }).click();
+  await expect(page.getByRole('status')).toContainText('bevestigd');
+  await expect(page.locator('.basket-total')).toContainText('4,25');
 });
