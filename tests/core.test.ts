@@ -94,6 +94,7 @@ beforeEach(() => {
   vi.useRealTimers();
   db.exec('PRAGMA foreign_keys=OFF; DROP TRIGGER IF EXISTS protect_last_admin_delete;');
   for (const table of [
+    'jobs',
     'outbox',
     'inbox',
     'audit',
@@ -600,36 +601,117 @@ describe('backup and restore', () => {
   });
 });
 
-describe('scheduler and additional round migration',()=>{
- it('opens planned rounds, queues eligible invitations once and leaves paused employees alone',async()=>{
-  const {tick}=await import('../src/lib/server/scheduler');
-  const s=(await import('../src/lib/server/config')).settings();
-  saveSettings({...s,weekdays:[],smtp:{...s.smtp,host:''}},'test');
-  const first=employee(),paused=employee('TestVos');
-  run('UPDATE employees SET email=? WHERE id=?','test@example.invalid',first);
-  run('UPDATE employees SET preferences=? WHERE id=?','{"participation":"paused","confirmations":false}',paused);
-  const r=round('planned');run('UPDATE rounds SET closes=? WHERE id=?',Date.now()+20*60000,r);
-  await tick();await tick();
-  expect(one('SELECT status FROM rounds WHERE id=?',r).status).toBe('open');
-  expect(all("SELECT * FROM outbox WHERE kind='invitation'")).toHaveLength(1);
- });
- it('retains referenced orders while migrating to multiple rounds per day',()=>{
-  const legacyDir=mkdtempSync(resolve(tmpdir(),'smikkel-legacy-'));
-  try{const legacy=new (db.constructor as any)(resolve(legacyDir,'smikkelbeer.sqlite'));legacy.exec(readFileSync('migrations/001_initial.sql','utf8'));legacy.exec("CREATE TABLE migrations(name TEXT PRIMARY KEY,applied INTEGER NOT NULL); INSERT INTO migrations VALUES ('001_initial.sql',1);");
-   legacy.prepare('INSERT INTO employees(id,name,name_key,email,created) VALUES (?,?,?,?,?)').run('e','Beer','beer','test@example.invalid',1);
-   legacy.prepare('INSERT INTO rounds(id,number,day,opens,closes,sends,arrives,snapshot,digest,payment_mode,test) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run('r','SB-legacy','2026-10-29',1,2,3,4,'[]','digest','individual',1);
-   legacy.prepare('INSERT INTO orders(id,round_id,employee_id,name,lines,total,revision,updated) VALUES (?,?,?,?,?,?,?,?)').run('o','r','e','Beer','[]',0,1,1);legacy.close();
-   execFileSync(process.execPath,['--input-type=module','-e',"import './src/lib/server/db.ts'"],{env:{...process.env,DATA_DIR:legacyDir},stdio:'pipe'});
-   const migrated=new (db.constructor as any)(resolve(legacyDir,'smikkelbeer.sqlite'));expect(migrated.prepare('SELECT round_id FROM orders').get().round_id).toBe('r');expect(migrated.prepare('PRAGMA foreign_key_check').all()).toHaveLength(0);
-   migrated.prepare('INSERT INTO rounds(id,number,day,opens,closes,sends,arrives,snapshot,digest,payment_mode,test) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run('r2','SB-extra','2026-10-29',5,6,7,8,'[]','digest','individual',1);expect(migrated.prepare('SELECT count(*) n FROM rounds').get().n).toBe(2);migrated.close();
-  }finally{rmSync(legacyDir,{recursive:true,force:true});}
- });
- it('blocks overlapping manual rounds and allows separate windows on one day',async()=>{
-  const {createRound}=await import('../src/lib/server/orders');
-  const at=Date.now();run('INSERT INTO syncs VALUES (?,?,1,?,?,NULL)',randomUUID(),at,digest(products),JSON.stringify(products));
-  const future='2099-10-29';const input={day:future,invite:'11:45',close:'12:00',send:'12:05',arrival:'12:30',paymentMode:'individual'};
-  await createRound(input,'test',false);await expect(createRound(input,'test',false)).rejects.toThrow('overlappen');
-  await createRound({...input,invite:'13:00',close:'13:15',send:'13:20',arrival:'13:45'},'test',false);
-  expect(all('SELECT * FROM rounds WHERE day=?',future)).toHaveLength(2);
- });
+describe('scheduler and additional round migration', () => {
+  it('opens planned rounds, queues eligible invitations once and leaves paused employees alone', async () => {
+    const { tick } = await import('../src/lib/server/scheduler');
+    const s = (await import('../src/lib/server/config')).settings();
+    saveSettings({ ...s, weekdays: [], smtp: { ...s.smtp, host: '' } }, 'test');
+    const first = employee(),
+      paused = employee('TestVos');
+    run('UPDATE employees SET email=? WHERE id=?', 'test@example.invalid', first);
+    run(
+      'UPDATE employees SET preferences=? WHERE id=?',
+      '{"participation":"paused","confirmations":false}',
+      paused,
+    );
+    const r = round('planned');
+    run('UPDATE rounds SET closes=? WHERE id=?', Date.now() + 20 * 60000, r);
+    await tick();
+    await tick();
+    expect(one('SELECT status FROM rounds WHERE id=?', r).status).toBe('open');
+    expect(all("SELECT * FROM outbox WHERE kind='invitation'")).toHaveLength(1);
+  });
+  it('retains referenced orders while migrating to multiple rounds per day', () => {
+    const legacyDir = mkdtempSync(resolve(tmpdir(), 'smikkel-legacy-'));
+    try {
+      const legacy = new (db.constructor as any)(resolve(legacyDir, 'smikkelbeer.sqlite'));
+      legacy.exec(readFileSync('migrations/001_initial.sql', 'utf8'));
+      legacy.exec(
+        "CREATE TABLE migrations(name TEXT PRIMARY KEY,applied INTEGER NOT NULL); INSERT INTO migrations VALUES ('001_initial.sql',1);",
+      );
+      legacy
+        .prepare('INSERT INTO employees(id,name,name_key,email,created) VALUES (?,?,?,?,?)')
+        .run('e', 'Beer', 'beer', 'test@example.invalid', 1);
+      legacy
+        .prepare(
+          'INSERT INTO rounds(id,number,day,opens,closes,sends,arrives,snapshot,digest,payment_mode,test) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        )
+        .run('r', 'SB-legacy', '2026-10-29', 1, 2, 3, 4, '[]', 'digest', 'individual', 1);
+      legacy
+        .prepare(
+          'INSERT INTO orders(id,round_id,employee_id,name,lines,total,revision,updated) VALUES (?,?,?,?,?,?,?,?)',
+        )
+        .run('o', 'r', 'e', 'Beer', '[]', 0, 1, 1);
+      legacy.close();
+      execFileSync(
+        process.execPath,
+        ['--input-type=module', '-e', "import './src/lib/server/db.ts'"],
+        { env: { ...process.env, DATA_DIR: legacyDir }, stdio: 'pipe' },
+      );
+      const migrated = new (db.constructor as any)(resolve(legacyDir, 'smikkelbeer.sqlite'));
+      expect(migrated.prepare('SELECT round_id FROM orders').get().round_id).toBe('r');
+      expect(migrated.prepare('PRAGMA foreign_key_check').all()).toHaveLength(0);
+      migrated
+        .prepare(
+          'INSERT INTO rounds(id,number,day,opens,closes,sends,arrives,snapshot,digest,payment_mode,test) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        )
+        .run('r2', 'SB-extra', '2026-10-29', 5, 6, 7, 8, '[]', 'digest', 'individual', 1);
+      expect(migrated.prepare('SELECT count(*) n FROM rounds').get().n).toBe(2);
+      migrated.close();
+    } finally {
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+  it('blocks overlapping manual rounds and allows separate windows on one day', async () => {
+    const { createRound } = await import('../src/lib/server/orders');
+    const at = Date.now();
+    run(
+      'INSERT INTO syncs VALUES (?,?,1,?,?,NULL)',
+      randomUUID(),
+      at,
+      digest(products),
+      JSON.stringify(products),
+    );
+    const future = '2099-10-29';
+    const input = {
+      day: future,
+      invite: '11:45',
+      close: '12:00',
+      send: '12:05',
+      arrival: '12:30',
+      paymentMode: 'individual',
+    };
+    await createRound(input, 'test', false);
+    await expect(createRound(input, 'test', false)).rejects.toThrow('overlappen');
+    await createRound(
+      { ...input, invite: '13:00', close: '13:15', send: '13:20', arrival: '13:45' },
+      'test',
+      false,
+    );
+    expect(all('SELECT * FROM rounds WHERE day=?', future)).toHaveLength(2);
+  });
+});
+
+it('alerts the coordinator exactly once when final source validation blocks a round', async () => {
+  const { settings } = await import('../src/lib/server/config');
+  const { tick } = await import('../src/lib/server/scheduler');
+  const s = settings();
+  saveSettings(
+    { ...s, weekdays: [], coordinator: 'test@example.invalid', smtp: { ...s.smtp, host: '' } },
+    'test',
+  );
+  const id = employee(),
+    r = round();
+  run('UPDATE employees SET preferences=? WHERE id=?', '{"confirmations":false}', id);
+  saveOrder(id, {
+    roundId: r,
+    revision: 0,
+    declined: false,
+    lines: [{ productId: '85', optionIds: [], quantity: 1, note: '' }],
+  });
+  run('UPDATE rounds SET closes=0,sends=0 WHERE id=?', r);
+  await tick();
+  await tick();
+  expect(one('SELECT status FROM rounds WHERE id=?', r).status).toBe('blocked');
+  expect(all("SELECT * FROM outbox WHERE kind='alert' AND round_id=?", r)).toHaveLength(1);
 });

@@ -35,3 +35,5 @@ Alternatieven: `cancelled` vóór verzending; `blocked` bij bronfout/prijswijzig
 Iedereen betaalt bij de cafetaria of één persoon schiet voor. De aparte betalingsrol ziet bedragen en kan individuele/openstaande bedragen kopiëren en handmatig betaald markeren. Geen bankverificatie of betaal-API. Betaalverzoeklinks openen alleen op initiatief van de medewerker; de server haalt ze niet op.
 
 Afwezigheid heeft een inclusieve einddatum; deelname hervat automatisch. Pauzeren is vrijwillig en verhindert profieltoegang via een nieuw aangevraagde link niet. Deactiveren door beheer trekt alle sessies/links in en verhindert nieuwe toegang. Eén ronde overslaan onderdrukt uitnodigingen; expliciet geen snacks kiezen legt niet-deelname vast.
+
+Broncontrole-herpogingen gebruiken een aparte persistente tijdbegrenzing. Dit verhindert niet dat een geblokkeerde ronde één waarschuwing aan de coördinator oplevert; waarschuwingen blijven apart van de herpogingstimer geregistreerd.

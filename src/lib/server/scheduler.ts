@@ -1,5 +1,4 @@
 import { DateTime } from 'luxon';
-import { randomUUID } from 'node:crypto';
 import { all, one, run, transaction, audit } from './db';
 import { settings } from './config';
 import { participates } from './auth';
@@ -50,9 +49,14 @@ export async function tick() {
         run("UPDATE rounds SET status='open' WHERE id=? AND status='planned'", r.id);
       if (now >= r.closes) {
         run("UPDATE rounds SET status='closed' WHERE id=? AND status IN ('planned','open')", r.id);
-        if (now >= r.sends && (!r.issue || !r.alerted || now - r.alerted > 300000)) {
+        const retry = one('SELECT until FROM jobs WHERE key=?', 'finalize:' + r.id);
+        if (now >= r.sends && (!retry || retry.until <= now)) {
           await finalizeRound(r.id);
-          run("UPDATE rounds SET alerted=? WHERE id=? AND status='blocked'", now, r.id);
+          run(
+            'INSERT INTO jobs VALUES (?,?) ON CONFLICT(key) DO UPDATE SET until=excluded.until',
+            'finalize:' + r.id,
+            now + 300000,
+          );
         }
         continue;
       }
@@ -131,6 +135,7 @@ export async function tick() {
 export function retain(days: number) {
   const cutoff = Date.now() - days * 86400000;
   transaction(() => {
+    run('DELETE FROM jobs WHERE until<?', Date.now());
     run('DELETE FROM sessions WHERE expires<?', Date.now());
     run('DELETE FROM tokens WHERE expires<?', Date.now());
     run('DELETE FROM rate_limits WHERE expires<?', Date.now());
@@ -153,7 +158,4 @@ export function startScheduler() {
   process.once('SIGTERM', () => {
     if (timer) clearInterval(timer);
   });
-}
-export function jobId() {
-  return randomUUID();
 }
