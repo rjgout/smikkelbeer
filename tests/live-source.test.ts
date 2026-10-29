@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -60,7 +60,7 @@ it.skipIf(process.env.SMIKKEL_LIVE_SOURCE !== '1')(
         available: catalog.filter((p: any) => p.available).length,
         elapsedMs: Date.now() - start,
       };
-      writeFileSync('/tmp/smikkel-live-sync-evidence.json', JSON.stringify(evidence, null, 2));
+      console.info('Live source evidence:', JSON.stringify(evidence));
       expect(catalog.length).toBe(status.total);
       expect(one('SELECT count(*) count FROM outbox').count).toBe(0);
     } finally {
