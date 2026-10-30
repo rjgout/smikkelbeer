@@ -1,0 +1,104 @@
+name: Verify and publish
+on:
+  push:
+    branches: [main, codex/smikkelbeer]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      - run: npm audit --audit-level=moderate
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:e2e
+      - run: npm run build
+        env:
+          BUILDING: '1'
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-failure
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 3
+  codeql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+        with:
+          output: sarif-results
+      - name: Enforce security findings gate
+        run: node scripts/check-sarif.mjs sarif-results
+  image:
+    needs: [verify, codeql]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: smikkelbeer:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify restricted runtime
+        run: node scripts/smoke.mjs
+        env:
+          SMIKKEL_SMOKE_IMAGE: smikkelbeer:scan
+      - name: Scan runtime image
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: smikkelbeer:scan
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested image
+        if: github.event_name == 'push'
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          tag=preview
+          if [ "$BRANCH" = main ]; then tag=latest; fi
+          docker tag smikkelbeer:scan "$IMAGE:sha-$COMMIT"
+          docker tag smikkelbeer:scan "$IMAGE:$tag"
+          docker push "$IMAGE:sha-$COMMIT"
+          docker push "$IMAGE:$tag"

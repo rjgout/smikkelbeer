@@ -1,0 +1,49 @@
+# Beheerhandleiding
+
+## Rollen
+
+Volledige beheerder heeft alle rechten, inclusief instellingen en rollen. Systeemrollen zijn beschermd. Bestelcoördinator: `rounds`, `employees`, `menu`, `mail`. Betalingsverantwoordelijke: uitsluitend `payments`. Custom rollen krijgen expliciete rechten uit de vaste lijst. Alleen een volledige beheerder beheert roltoewijzingen en andere beheerders. Laatste volledige beheerder kan niet worden gedeactiveerd of gedegradeerd. Maak deelnemers apart aan via Medewerkers.
+
+## E-mail
+
+Stel SMTP TLS 465 of verplicht STARTTLS 587 in. IMAP gebruikt 993/TLS. Alleen publieke IPv4-mailservers worden ondersteund. Geen OAuth2 in deze versie. Gebruik een eigen mailbox en providergoedgekeurd app-wachtwoord. Wachtwoorden leeg laten bij opslaan behoudt de bestaande waarde. Opgeslagen waarden worden nooit opnieuw weergegeven.
+
+Testmails vereisen een expliciet gekozen adres op de testlijst. Het cafetaria-adres kan niet op die lijst staan. De eerste testontvanger ontvangt een verzamelde testbestelling. Persoonlijke testmails naar andere adressen zijn geblokkeerd; gebruik fictieve deelnemers met het toegestane testadres of schakel bevestigingen voor simulatieaccounts uit. In testmodus mogen alleen de expliciet toegestane adressen aflevering krijgen, ook als de outbox vóór een moduswissel is gevuld.
+
+Persoonlijke bevestigingsmails staan standaard aan. Uitnodigingen bevatten een fragmentlink en verlopen standaard na 15 minuten. Bevestigingen bevatten geen nieuwe inloglink. Bij een e-mailadreswijziging moet de medewerker de verificatielink vanuit de eigen sessie bevestigen.
+
+## Bron
+
+De officiële HTML bevat `.dish` met stabiele numerieke product-ID's, bedragen, categorieën en uitverkochte knoppen. Productopties worden via `/order/product/add/<id>` gelezen. De adapter accepteert bekende checkbox/radio-opties met optielimieten. Verplichte SiteDish-keuzelijsten vereisen expliciet precies één bronoptie; onbekende selecties of structuurwijzigingen blokkeren. Geen handmatig assortiment of prijzen.
+
+De technische live broncontracttest is op 29 oktober 2026 geslaagd voor alle 213 producten en 211 beschikbare optievensters; dit is geen certificering van toestemming of handmatige inhoudsacceptatie. Robots.txt gaf tijdens onderzoek 404; dat is geen toestemming voor geautomatiseerd gebruik. Voorwaarden/toestemming moeten door de beheerder worden beoordeeld vóór activering. Houd de frequentie laag; geen anti-bot-, login- of CAPTCHA-omzeiling. Bij bronwijziging: fixtures/adapter bijwerken, testen en herbeoordelen.
+
+## Statusmachine
+
+`planned → open → closed → queued → sending → sent → confirmed → completed`.
+
+Alternatieven: `cancelled` vóór verzending; `blocked` bij bronfout/prijswijziging; `failed` bij zeker mislukte aflevering; `unknown` bij time-out/crash/herstel; `review` bij inkomende mail. Een lege ronde gaat van gesloten naar afgehandeld zonder cafetariamail.
+
+- `blocked`: bekijk Menukaart en corrigeer bronproblemen. Opnieuw controleren kan op het ingestelde verzendmoment. Bij gewijzigde snapshot: annuleer en maak met een nieuw niet-overlappend bestelvenster een nieuwe ronde; deelnemers bestellen en bevestigen opnieuw. Extra handmatige rondes op dezelfde dag zijn toegestaan; bestelvensters mogen niet overlappen. Automatische planning maakt maximaal één ronde per dag.
+- `unknown`: controleer verzonden items en neem zo nodig contact op met de cafetaria. Leg de werkelijke uitkomst en onderbouwing vast bij de ronde. Geen automatische retry of knop die de volledige bestelling opnieuw verstuurt.
+- `failed`: controleer provider/credentials. Niet-bestelmails met een zeker mislukte aflevering hebben een API voor expliciete retry. Voor cafetariamails is geen retryflow vrijgegeven; handel gecontroleerd af.
+- Inkomende mail wordt uitsluitend ter beoordeling aangeboden, ook bij overeenkomstige afzender en bestelnummer. De coördinator bevestigt ontvangst na controle. Na de ingestelde termijn verschijnt een waarschuwing per mail/dashboard, nooit een nieuwe bestelling.
+- Na verzending kan alleen aankomsttijd worden aangepast met expliciet aangevinkte bevestiging; er gaat een afzonderlijke correctiemail uit, geen kopie van de bestelling.
+
+## Betalingen en deelname
+
+Iedereen betaalt bij de cafetaria of één persoon schiet voor. De aparte betalingsrol ziet bedragen en kan individuele/openstaande bedragen kopiëren en handmatig betaald markeren. Geen bankverificatie of betaal-API. Betaalverzoeklinks openen alleen op initiatief van de medewerker; de server haalt ze niet op.
+
+Afwezigheid heeft een inclusieve einddatum; deelname hervat automatisch. Pauzeren is vrijwillig en verhindert profieltoegang via een nieuw aangevraagde link niet. Deactiveren door beheer trekt alle sessies/links in en verhindert nieuwe toegang. Eén ronde overslaan onderdrukt uitnodigingen; expliciet geen snacks kiezen legt niet-deelname vast.
+
+Broncontrole-herpogingen gebruiken een aparte persistente tijdbegrenzing. Dit verhindert niet dat een geblokkeerde ronde één waarschuwing aan de coördinator oplevert; waarschuwingen blijven apart van de herpogingstimer geregistreerd.
+
+De automatische planning synchroniseert standaard 30 minuten vóór de uitnodigingstijd. Deze marge is via Instellingen instelbaar (10–120 minuten). Ook een ronde kort na middernacht kan de voorafgaande avond worden voorbereid. Uitnodigingen starten pas op het ingestelde tijdstip.
+
+Meervoudige identieke verplichte sauskeuzes in bronpakketten blijven afzonderlijke keuzes, ook met dezelfde bronoptie-IDs. Voorbereidingstijd wordt na de broncontrole én direct vóór SMTP opnieuw gecontroleerd. Een bestaand bestelmailrecord wordt nooit automatisch opnieuw klaargezet. Testidentiteit blijft per uitgaand bericht bewaard bij latere modus- of ontvangerwijzigingen.
+
+Een onbeoordeelde inkomende reactie onderdrukt de waarschuwing bij ontbrekende ontvangstbevestiging niet. Alleen daadwerkelijk bevestigde of afgehandelde rondes verlaten deze controle.
+
+Menukaart synchroniseren start nu een achtergrondtaak. De beheerpagina toont aantal verwerkte/totale producten en pollt een afzonderlijk statusendpoint; het scherm mag worden gesloten. Een ronde maken gebruikt direct een integere, volledig gecontroleerde menukaart van maximaal 30 minuten oud; alleen bij ontbrekende, mislukte of verouderde controle is achtergrondwerk nodig. De bron opnieuw controleren vóór verzending blijft altijd een volledige controle. Na een verloren antwoord zoekt de browser de rondeaanvraag terug via het bewaarde aanvraag-ID; een herhaalde klik maakt dezelfde ronde niet opnieuw. Bij herstart wordt een verdwenen worker met voortgang als onderbroken getoond zodra zijn lease is verlopen; niet blind opnieuw klikken bij een proxyfout. Wacht op de status en de cooldown. Zie MENU_SYNC.md voor de volledige Cloudflare-diagnose en herstelprocedure.
+
+Medewerkers zien nu de eerstvolgende geplande ronde vóór opening. De knop blijft dan uitgeschakeld; producten worden pas binnen het servervenster geladen. De pagina ververst automatisch, toont na sluiting de eigen ingediende bestelling en geeft pauze/vakantie/overslaan aan zonder voorkeuren te wijzigen. Zie [werking en NAS-acceptatie](EMPLOYEE_ROUNDS.md).
