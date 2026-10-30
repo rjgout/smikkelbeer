@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, money, time, date } from '#lib/client';
+  import { api, ApiError, money, time, date, roundDay } from '#lib/client';
+  import { roundWindowStatus } from '#lib/round-window';
   type Line = { productId: string; optionIds: string[]; quantity: number; note: string };
   let data: any = $state(null),
     message = $state(''),
@@ -18,27 +19,176 @@
     note = $state(''),
     quantity = $state(1),
     newEmail = $state('');
-  async function load() {
-    try {
-      data = await api('employee');
-      cart = data.order
-        ? JSON.parse(data.order.lines).map((l: any) => ({
+  let clock = $state(0),
+    statusReady = $state(false),
+    roundRefreshError = $state('');
+  let anchor = { server: 0, client: 0 },
+    disposed = false,
+    requesting = false,
+    lastRefresh = 0,
+    failures = 0,
+    reloadAfterRefresh = false;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshController: AbortController | undefined;
+  const serverTime = () => anchor.server + Math.max(0, performance.now() - anchor.client);
+  function updateClock(timeline: any, started: number) {
+    const received = performance.now();
+    // Include request duration conservatively so a slow response never extends a deadline.
+    anchor = { server: timeline.serverNow + Math.max(0, received - started), client: received };
+    clock = serverTime();
+  }
+  function applyData(fresh: any, restoreCart: boolean, started: number) {
+    const changedRound = data?.round?.id !== fresh.round?.id;
+    data = { ...fresh, profile: data?.profile || fresh.profile };
+    updateClock(fresh.timeline, started);
+    statusReady = true;
+    if (restoreCart || changedRound) {
+      cart = fresh.order
+        ? JSON.parse(fresh.order.lines).map((l: any) => ({
             productId: l.productId,
             optionIds: l.optionIds,
             quantity: l.quantity,
             note: l.note,
           }))
         : [];
-      revision = data.order?.revision || 0;
+      revision = fresh.order?.revision || 0;
+      selected = null;
+    }
+  }
+  function scheduleRefresh(
+    delay = data?.timeline?.active || data?.timeline?.upcoming?.length ? 30000 : 60000,
+  ) {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    if (disposed || !data || document.hidden) return;
+    const now = serverTime();
+    // A slow reply may arrive after the known opening. Check again shortly;
+    // do not lose that transition by waiting for the normal polling interval.
+    if (!failures && data.timeline?.upcoming?.some((r: any) => r.opens <= now))
+      delay = Math.min(delay, 1000);
+    const boundaries = [
+      data.round?.closes,
+      ...(data.timeline?.upcoming || []).map((r: any) => r.opens),
+    ].filter((t: number) => t > now);
+    const next = Math.min(delay, ...boundaries.map((t: number) => t - now));
+    refreshTimer = setTimeout(
+      () => {
+        clock = serverTime();
+        if (!orderingOpen) selected = null;
+        void refreshRounds();
+      },
+      Math.max(1, next),
+    );
+  }
+  async function load() {
+    if (requesting) {
+      reloadAfterRefresh = true;
+      return;
+    }
+    requesting = true;
+    refreshController = new AbortController();
+    const timeout = setTimeout(() => refreshController?.abort(), 10000);
+    const started = performance.now();
+    try {
+      const fresh = await api('employee', undefined, { signal: refreshController.signal });
+      if (!disposed) applyData(fresh, true, started);
     } catch (e) {
-      if (!(e instanceof Error) || !e.message.includes('Log in')) {
-        message = String(e instanceof Error ? e.message : e);
+      if (!disposed && (!(e instanceof ApiError) || e.httpStatus !== 401)) {
+        message = 'We kunnen je gegevens even niet ophalen. Probeer de pagina opnieuw te openen.';
         failure = true;
       }
+    } finally {
+      clearTimeout(timeout);
+      requesting = false;
+      loading = false;
+      scheduleRefresh();
     }
-    loading = false;
   }
-  onMount(load);
+  async function refreshRounds() {
+    if (disposed || !data || document.hidden || requesting) return;
+    requesting = true;
+    lastRefresh = performance.now();
+    refreshController = new AbortController();
+    const timeout = setTimeout(() => refreshController?.abort(), 10000);
+    const started = performance.now();
+    try {
+      const timeline = await api('employee/rounds', undefined, {
+        signal: refreshController.signal,
+      });
+      if (disposed || !data) return;
+      updateClock(timeline, started);
+      data.timeline = timeline;
+      statusReady = true;
+      const changed = (timeline.active?.id || null) !== (data.round?.id || null);
+      if (!timeline.active) {
+        selected = null;
+      }
+      if (changed) {
+        // Revoke the old screen before waiting for the full menu/order response.
+        data.round = null;
+        const fullStarted = performance.now();
+        const fresh = await api('employee', undefined, { signal: refreshController.signal });
+        if (!disposed && data) applyData(fresh, true, fullStarted);
+      } else if (data.round) data.round = { ...data.round, ...timeline.active };
+      failures = 0;
+      roundRefreshError = '';
+    } catch (e) {
+      if (disposed) return;
+      if (e instanceof ApiError && e.httpStatus === 401) {
+        data = null;
+        message = 'Je inlogsessie is verlopen. Vraag een nieuwe inloglink aan.';
+      } else
+        roundRefreshError = 'We kunnen de rondestatus even niet ophalen. We proberen het opnieuw.';
+      failures++;
+    } finally {
+      clearTimeout(timeout);
+      requesting = false;
+      if (reloadAfterRefresh) {
+        reloadAfterRefresh = false;
+        void load();
+      }
+      scheduleRefresh(failures ? Math.min(60000, 5000 * 2 ** Math.min(failures, 4)) : undefined);
+    }
+  }
+  onMount(() => {
+    void load();
+    const resume = () => {
+      clock = serverTime();
+      if (document.hidden) {
+        statusReady = false;
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshController?.abort();
+      } else {
+        statusReady = false;
+        void refreshRounds();
+      }
+    };
+    const focus = () => {
+      if (performance.now() - lastRefresh > 2000) void refreshRounds();
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('focus', focus);
+    return () => {
+      disposed = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshController?.abort();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('pageshow', resume);
+      window.removeEventListener('focus', focus);
+    };
+  });
+  const orderingOpen = $derived(
+    Boolean(statusReady && data?.round && roundWindowStatus(data.round, clock) === 'open'),
+  );
+  const prominentRound = $derived(
+    data?.timeline?.active || data?.timeline?.upcoming?.[0] || data?.timeline?.recent?.round,
+  );
+  const closedSummary = $derived(
+    data?.round && roundWindowStatus(data.round, clock) === 'closed'
+      ? { round: data.round, order: data.order }
+      : data?.timeline?.recent,
+  );
+  const ownClosedOrder = $derived(closedSummary?.order);
   const products = $derived(data?.round?.products || []);
   const filtered = $derived(
     products.filter(
@@ -99,12 +249,19 @@
     if (id) selectedOptions.push(id);
   }
   function choose(p: any) {
+    clock = serverTime();
+    if (!orderingOpen) return;
     selected = p;
     selectedOptions = [];
     note = '';
     quantity = 1;
   }
   function add() {
+    clock = serverTime();
+    if (!orderingOpen) {
+      selected = null;
+      return;
+    }
     const key = JSON.stringify([selected.id, [...selectedOptions].sort(), note.trim()]);
     const existing = cart.find(
       (l) => JSON.stringify([l.productId, [...l.optionIds].sort(), l.note]) === key,
@@ -131,6 +288,14 @@
     });
   }
   async function submit(declined = false) {
+    clock = serverTime();
+    if (!orderingOpen) {
+      selected = null;
+      message = 'De besteltijd is voorbij of nog niet begonnen. Je kunt nu niet bestellen.';
+      failure = true;
+      void refreshRounds();
+      return;
+    }
     await action(async () => {
       const r = await api('order', { roundId: data.round.id, revision, lines: cart, declined });
       revision = r.revision;
@@ -213,16 +378,91 @@
           <h1>Hoi {data.profile.name},<br />waar heb je trek in<span class="coral">?</span></h1>
           <p>Vers van ’t Centrum. Met liefde voor het team.</p>
         </div>
-        <div class="round-badge">
-          {#if data.round}<span class="live-dot"></span> Bestellen tot
-            <strong>{time(data.round.closes)}</strong><small
-              >Aankomst rond {time(data.round.arrives)}</small
-            >{:else}<strong>Even geen open ronde</strong><small
-              >Je krijgt een uitnodiging zodra we starten.</small
-            >{/if}
-        </div>
       </section>
-      {#if data.round}<div class="order-layout">
+      {#if roundRefreshError}<p class="notice" role="status">{roundRefreshError}</p>{/if}
+      {#if !statusReady}<p class="muted" role="status">
+          We controleren de actuele besteltijd…
+        </p>{/if}
+      {#if prominentRound}{@const r = prominentRound}
+        {@const phase = roundWindowStatus(r, clock)}
+        <section class="panel employee-round-card" aria-label="Bestelronde">
+          <div class="section-heading">
+            <h2>
+              {phase === 'upcoming'
+                ? 'De volgende smikkelronde 🍟'
+                : phase === 'open'
+                  ? 'Tijd voor een smikkelronde 🍟'
+                  : 'Deze smikkelronde is gesloten'}
+            </h2>
+            <span class="pill" class:round-open={phase === 'open'} aria-live="polite"
+              >{phase === 'upcoming'
+                ? 'Binnenkort'
+                : phase === 'open'
+                  ? 'Bestellen geopend'
+                  : 'Gesloten'}</span
+            >
+          </div>
+          <p class="round-day">{roundDay(r.opens)}</p>
+          {#if r.test}<span class="test-banner">Testronde</span>{/if}
+          <dl class="round-times">
+            <div>
+              <dt>Bestellen vanaf</dt>
+              <dd>{time(r.opens)} uur</dd>
+            </div>
+            <div>
+              <dt>Bestellen tot</dt>
+              <dd>{time(r.closes)} uur</dd>
+            </div>
+            <div>
+              <dt>Eten verwacht om</dt>
+              <dd>{time(r.arrives)} uur</dd>
+            </div>
+          </dl>
+          {#if phase === 'upcoming'}<p><strong>Nog niet geopend</strong></p>
+            <p>Vanaf {time(r.opens)} uur kun je jouw bestelling plaatsen.</p>
+            <button class="primary" disabled>Bestellen vanaf {time(r.opens)} uur</button>
+          {:else if phase === 'closed'}<p>
+              De besteltijd is voorbij. Je kunt je bestelling niet meer plaatsen of aanpassen.
+            </p>{/if}
+          {#if r.participation?.message}<p class="notice participation-note">
+              {r.participation.message} Dit verandert je voorkeuren niet.
+            </p>{/if}
+        </section>
+      {/if}
+      {#if data.timeline?.upcoming?.length && prominentRound?.id !== data.timeline.upcoming[0].id}
+        <section class="panel upcoming-rounds" aria-label="Volgende bestelrondes">
+          <h2>Hierna op de planning</h2>
+          {#each data.timeline.upcoming as r}<p>
+              <strong>{roundDay(r.opens)}</strong> · {time(r.opens)}–{time(r.closes)} uur · eten rond
+              {time(r.arrives)}{#if r.test}
+                · testronde{/if}
+            </p>{/each}
+        </section>
+      {:else if data.timeline?.upcoming?.length > 1}<details class="panel upcoming-rounds">
+          <summary>Meer geplande rondes ({data.timeline.upcoming.length - 1})</summary
+          >{#each data.timeline.upcoming.slice(1) as r}<p>
+              <strong>{roundDay(r.opens)}</strong> · {time(r.opens)}–{time(r.closes)} uur · eten rond
+              {time(r.arrives)}{#if r.test}
+                · testronde{/if}
+            </p>{/each}
+        </details>{/if}
+      {#if closedSummary}{@const recent = closedSummary}
+        <section class="panel closed-order" aria-label="Eigen bestelling na sluiting">
+          <h2>Jouw ingediende bestelling</h2>
+          <p class="muted">{roundDay(recent.round.opens)} · Gesloten</p>
+          {#if ownClosedOrder}{#if ownClosedOrder.declined}<p>
+                Je koos deze keer geen snacks.
+              </p>{:else}{#each JSON.parse(ownClosedOrder.lines) as line}<p>
+                  {line.quantity} × {line.name}{line.options?.length
+                    ? ' · ' + line.options.join(', ')
+                    : ''} <small>{line.note}</small>
+                </p>{/each}
+              <p><strong>Totaal {money(ownClosedOrder.total)}</strong></p>{/if}
+          {:else}<p>Je hebt voor deze ronde geen bestelling ingediend.</p>{/if}
+          <p class="muted small">De besteltijd is voorbij; wijzigen is niet meer mogelijk.</p>
+        </section>
+      {/if}
+      {#if orderingOpen}<div class="order-layout">
           <div class="menu-column">
             <section class="favorites">
               <div class="section-heading">
@@ -366,9 +606,12 @@
                 ✓ {data.order.declined ? 'Je doet niet mee' : 'Bestelling opgeslagen'}
               </div>{/if}
           </aside>
-        </div>{:else}<div class="panel empty">
-          <h2>Tot de volgende smikkelronde</h2>
-          <p>Bekijk je eerdere bestellingen of pas je deelname aan in je profiel.</p>
+        </div>{:else if !prominentRound}<div class="panel empty">
+          <h2>Nog geen volgende smikkelronde gepland</h2>
+          <p>
+            Zodra er een ronde is gepland, zie je hier de datum en tijden. Je kunt ook je eerdere
+            bestellingen bekijken of je deelname aanpassen in je profiel.
+          </p>
         </div>{/if}
     {:else if view === 'profile'}<section class="profile-panel panel">
         <div class="eyebrow">Helemaal van jou</div>
@@ -410,13 +653,14 @@
                   required
                 /></label
               >
-            </div>{/if}{#if data.round}<label class="check"
+            </div>{/if}{#if data.timeline?.active || data.timeline?.upcoming?.[0]}{@const preferenceRound =
+              data.timeline.active || data.timeline.upcoming[0]}<label class="check"
               ><input
                 type="checkbox"
-                checked={data.profile.preferences.skipRound === data.round.id}
+                checked={data.profile.preferences.skipRound === preferenceRound.id}
                 onchange={(e) =>
                   (data.profile.preferences.skipRound = e.currentTarget.checked
-                    ? data.round.id
+                    ? preferenceRound.id
                     : '')}
               /> Deze ronde geen uitnodigingen meer</label
             >{/if}<label class="check"
@@ -487,7 +731,7 @@
     >Met elkaar. Voor elkaar. En een beetje voor de snacks.</span
   >
 </footer>
-{#if selected}<div class="modal-backdrop">
+{#if selected && orderingOpen}<div class="modal-backdrop">
     <dialog
       use:openDialog
       onclose={() => (selected = null)}

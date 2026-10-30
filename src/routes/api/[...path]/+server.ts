@@ -19,6 +19,7 @@ import {
 } from '#lib/server/auth';
 import { settings, publicSettings, saveSettings } from '#lib/server/config';
 import { requestRoundCreation, roundCreationStatus } from '#lib/server/round-creation';
+import { employeeRounds } from '#lib/server/employee-rounds';
 import { syncHistory } from '#lib/server/menu';
 import { MenuSyncError, enqueueMenuSync, menuSyncStatus } from '#lib/server/menu-jobs';
 import { invite, enqueue, escape, renderOrder, pollInbox } from '#lib/server/mail';
@@ -122,16 +123,20 @@ export async function GET(event: RequestEvent) {
   }
   if (path === 'session')
     return json({ employee: identity(event, 'employee'), admin: identity(event, 'admin') });
+  if (path === 'employee/rounds') return json(employeeRounds(requireEmployee(event).id));
   if (path === 'employee') {
     const e = requireEmployee(event);
     const profile = one('SELECT id,name,email,preferences FROM employees WHERE id=?', e.id);
-    const round = one(
-      "SELECT id,number,day,closes,sends,arrives,status,snapshot,payment_mode,payment_link FROM rounds WHERE status='open' AND opens<=? AND closes>? ORDER BY opens DESC LIMIT 1",
-      Date.now(),
-      Date.now(),
-    );
+    const timeline = employeeRounds(e.id);
+    const round = timeline.active
+      ? one(
+          'SELECT id,number,day,opens,closes,sends,arrives,status,test,snapshot,payment_mode,payment_link FROM rounds WHERE id=?',
+          timeline.active.id,
+        )
+      : null;
     return json({
       profile: { ...profile, preferences: JSON.parse(profile.preferences) },
+      timeline,
       round: round ? { ...round, products: JSON.parse(round.snapshot), snapshot: undefined } : null,
       favorites: all('SELECT product_id FROM favorites WHERE employee_id=?', e.id).map(
         (x) => x.product_id,

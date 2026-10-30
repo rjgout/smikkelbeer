@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { all, one, run, transaction, audit } from './db';
 import { settings } from './config';
 import { latestMenu, syncMenu, priceLines, type Product } from './menu';
+import { roundWindowStatus } from '../round-window';
 import { MenuSyncError } from './menu-jobs';
 import { enqueue, escape, renderOrder, type FrozenOrder } from './mail';
 export const roundInput = z.object({
@@ -130,7 +131,7 @@ export function saveOrder(employeeId: string, input: unknown) {
     .parse(input);
   return transaction(() => {
     const round = one('SELECT * FROM rounds WHERE id=?', v.roundId);
-    if (!round || round.status !== 'open' || Date.now() >= round.closes || Date.now() < round.opens)
+    if (!round || roundWindowStatus(round, Date.now()) !== 'open')
       error(409, 'Deze ronde is gesloten');
     const employee = one('SELECT * FROM employees WHERE id=? AND active=1', employeeId);
     if (!employee) error(403, 'Medewerker niet actief');

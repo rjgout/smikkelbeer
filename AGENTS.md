@@ -30,3 +30,10 @@ Beveiliging gaat boven functionaliteit. Markeer onvoltooide acceptatiecriteria e
 - Ronde-aanmaak hergebruikt uitsluitend de laatste geslaagde, integere momentopname van maximaal 30 minuten oud; een latere bronfout mag niet worden overgeslagen. Een gevulde ronde vereist vóór verzending altijd een nieuwe volledige broncontrole.
 - Handmatige ronde-aanvragen gebruiken een persistent aanvraag-ID met transactionele deduplicatie en een geautoriseerd herstel-statusendpoint. Herhaal onzekere POSTs nooit automatisch; gebruik hetzelfde ID bij een expliciete herhaling.
 - Bouw HTML-datums expliciet als YYYY-MM-DD uit kalenderdelen in Europe/Amsterdam; vertrouw niet op de weergavevolgorde van een locale zoals en-CA.
+
+## Medewerkers en rondevensters
+
+- Geplande rondes tonen alleen geprojecteerde metadata; product-snapshots worden uitsluitend binnen het servervenster vrijgegeven. Gebruik de gedeelde roundWindowStatus-controle bij lezen en bestellen. Alleen gevalideerde planned/open-rondes mogen binnen hun tijden open worden; cancelled/blocked/closed nooit.
+- GET-status wijzigt geen rondes, deelnamevoorkeuren of bestellingen en start geen broncontrole of e-mail. Toon uitsluitend de eigen bestelgegevens.
+- Gebruik lichte zichtbare-tab-polling plus opening-/sluitingstimers, de servertijd en een monotone browserklok. Een bekende sluiting blokkeert de interface ook bij een verbindingsfout. Behoud onopgeslagen mandjes/profielvelden.
+- Deelnamevoorkeuren bepalen uitnodigingen; wijzig ze nooit automatisch. Behoud expliciet handmatig bestellen binnen het servervenster. Test tijdgrenzen, DST, annulering, sessieprivacy en iPhone/WebKit.

@@ -31,3 +31,7 @@ Bronaanvragen: vaste host/paden, geen configureerbare URL, minimaal één second
 ## Persistente menukaartworker
 
 Menukaartsynchronisaties en afhankelijke handmatige ronde-acties verlaten de HTTP-requestketen via een SQLite-taak met HTTP 202 en een apart statusendpoint. De worker draait in hetzelfde applicatieproces, met database-exclusiviteit, heartbeat/werklease, fencing en atomische publicatie van uitsluitend volledige catalogi. De browser pollt de taak en kan herladen of sluiten. Zie MENU_SYNC.md voor protocol, toestandsovergangen, foutgrenzen en herstel. Dit voegt geen container, externe queue of functionele omgevingsvariabelen toe.
+
+## Medewerkersvensters
+
+De medewerkers-API projecteert geplande rondemetadata en de eigen laatst gesloten bestelling. Een afzonderlijke lichte status-GET stuurt zichtbare-tab-verversing; snapshots worden uitsluitend binnen het servervenster geleverd. De gedeelde tijdcontrole laat gevalideerde planned/open-rondes binnen hun venster bestellen, onafhankelijk van een vertraagde scheduler, en sluit andere statussen uit. GET schrijft niets. De browser blokkeert op de bekende deadline via monotone servertijd, terwijl iedere POST opnieuw door de server wordt gecontroleerd. Zie EMPLOYEE_ROUNDS.md.

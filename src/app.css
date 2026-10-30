@@ -1336,3 +1336,64 @@ dialog.modal::backdrop {
 .sync-progress p {
   margin: 12px 0;
 }
+
+.employee-round-card {
+  margin-bottom: 1.25rem;
+}
+.employee-round-card .section-heading {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.round-day {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.round-times {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+.round-times dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.round-times dd {
+  margin: 0.35rem 0 0;
+  font-weight: 700;
+}
+.round-open {
+  color: #225b44;
+  background: #e8f5ec;
+}
+.participation-note,
+.closed-order,
+.upcoming-rounds {
+  margin-top: 1rem;
+}
+@media (max-width: 600px) {
+  .round-times {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
+  .round-times > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .round-times dd {
+    margin: 0;
+  }
+}
+
+.round-day::first-letter {
+  text-transform: uppercase;
+}
+.employee-round-card .test-banner {
+  display: inline-block;
+  padding: 0.25rem 0.65rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}

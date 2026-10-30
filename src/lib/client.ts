@@ -101,3 +101,12 @@ export function calendarDate(value = new Date(), timeZone = 'Europe/Amsterdam') 
   const field = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)!.value;
   return `${field('year')}-${field('month')}-${field('day')}`;
 }
+
+export const roundDay = (timestamp: number) =>
+  new Intl.DateTimeFormat('nl-NL', {
+    timeZone: 'Europe/Amsterdam',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(timestamp));

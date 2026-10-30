@@ -58,3 +58,5 @@ Bezoek daarna `/setup` via HTTPS. Een nieuw datavolume genereert automatisch een
 - [Oorspronkelijke opdracht](docs/MASTERPROMPT.md)
 
 Menukaartsynchronisatie loopt als persistente achtergrondtaak: de start-API antwoordt direct 202 en de beheerpagina toont voortgang via korte statusrequests. Dit voorkomt dat honderden optievensters binnen één Cloudflare-request moeten passen. Rondevoorbereiding gebruikt direct een volledig gecontroleerde momentopname van maximaal 30 minuten oud; zo nodig volgt een aparte achtergrondtaak. Vóór verzending volgt altijd een nieuwe volledige broncontrole. Aanvraag-IDs voorkomen dubbele ronde-aanmaak na verloren antwoorden. Zie [Cloudflare-diagnose en synchronisatiebeheer](docs/MENU_SYNC.md).
+
+Medewerkers zien geplande rondes met datum en tijden; het bestelvenster opent en sluit automatisch op basis van servertijd. Na sluiting blijft de eigen bestelling leesbaar. Zie [medewerkersrondes en NAS-acceptatie](docs/EMPLOYEE_ROUNDS.md).
